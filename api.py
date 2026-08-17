@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import cv2
+import numpy as np
 import threading
 import time
 import json
@@ -77,6 +78,10 @@ current_distance_cm = 999
 log_history = []
 esp_commands = []
 
+# Webots Simulation State
+webots_mode = False
+last_webots_cmd = "stop"
+
 # Map State
 live_location = None
 source_location = None
@@ -131,6 +136,10 @@ def send_esp32(cmd: str):
         ts = datetime.now().strftime("%H:%M:%S")
         esp_commands.append(f"[{ts}] {cmd_str}")
         if len(esp_commands) > 30: esp_commands.pop(0)
+    
+    # Store for Webots bridge polling
+    global last_webots_cmd
+    last_webots_cmd = cmd
     
     if not ws_connected or ws is None:
         return
@@ -210,6 +219,10 @@ def add_log(message: str):
 def camera_loop():
     global latest_frame
     while True:
+        if webots_mode:
+            time.sleep(0.05)
+            continue
+            
         if cap.isOpened():
             ret, frame = cap.read()
             if ret:
@@ -377,6 +390,29 @@ def yolo_loop():
 # ============================================================
 # API Endpoints
 # ============================================================
+
+@app.post("/webots/frame")
+async def receive_webots_frame(request: Request):
+    """Receive JPEG frames from Webots simulator."""
+    global latest_frame, webots_mode
+    if not webots_mode:
+        webots_mode = True
+        add_log("🎮 Webots Simulator Connected. Real camera ignored.")
+        
+    data = await request.body()
+    nparr = np.frombuffer(data, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if frame is not None:
+        with frame_lock:
+            latest_frame = frame
+            
+    return {"status": "ok"}
+
+@app.get("/webots/command")
+async def get_webots_command():
+    """Webots simulator polls this to get the steering command."""
+    return {"command": last_webots_cmd}
 
 @app.get("/")
 def root():
