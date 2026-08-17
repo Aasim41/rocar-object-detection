@@ -4,6 +4,8 @@ import numpy as np
 class EdgeTracker:
     def __init__(self):
         # Tuning parameters for P-controller
+        # PRECAUTION: If the bot is reacting too aggressively (wobbling/snaking), LOWER this value (e.g., 0.2 or 0.3).
+        # If it is reacting too sluggishly and hitting the curb, RAISE this value (e.g., 0.7 or 0.8) for sharper turns.
         self.Kp = 0.5  # Proportional gain
         
         # Target offset from the left edge (in pixels on the warped frame)
