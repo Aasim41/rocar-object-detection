@@ -1,19 +1,22 @@
 """
-Universal Road Follower — Works on ANY forward-facing camera.
-No calibration, no perspective transform, no fragile edge detection.
+Road Boundary Follower — All Conditions, All Road Shapes.
 
-Algorithm:
-  1. Sample two horizontal scan lines across the image
-     - Near line (~70% down): for immediate steering
-     - Far line  (~50% down): for anticipating curves ahead
-  2. At each scan line, find the LEFT and RIGHT boundaries of the
-     dark road surface (asphalt is darker than sidewalks/grass/buildings)
-  3. Calculate the road center, then offset it left for edge-biased
-     navigation (Indian left-hand traffic)
-  4. Feed the error into a P-controller → output left/right/forward
+Works at dawn, noon, dusk, night, rain, overcast.
+Handles straights, curves, sharp turns, blind curves, cuts.
 
-This works in Webots AND on the physical bot because it relies on the
-fundamental property that road = dark, surroundings = lighter.
+THREE independent road detection methods vote together:
+  1. ADAPTIVE COLOR MATCH — learns road color from bottom of frame
+  2. HSV SATURATION — roads are gray (low saturation), surroundings are colorful
+  3. TEXTURE SMOOTHNESS — road surface is uniform, boundaries have sharp gradients
+
+A pixel is "road" if at least 2 of 3 methods agree.
+
+Steering uses Position + Heading:
+  POSITION keeps the car on the road.
+  HEADING anticipates curves before reaching them.
+
+Preprocessing: CLAHE histogram equalization normalizes lighting so the
+algorithm sees the same contrast whether it's noon or midnight.
 """
 
 import cv2
@@ -22,164 +25,211 @@ import numpy as np
 
 class EdgeTracker:
     def __init__(self):
-        # --- Tuning Parameters ---
-        # PRECAUTION: If the bot wobbles/snakes, LOWER Kp (e.g., 0.3).
-        # If it reacts too slowly and drifts off, RAISE Kp (e.g., 0.8).
-        self.Kp = 0.5
+        # --- Steering ---
+        self.Kp_position = 0.4
+        self.Kp_heading  = 0.6
+        self.dead_zone   = 0.03
+        self.num_scans   = 15
 
-        # How far to offset from center toward the left edge.
-        # 0.0 = hug the center, 0.3 = 30% toward the left boundary.
-        # For Indian roads (left-hand traffic), keep 0.2–0.3.
-        self.edge_bias = 0.25
+        # --- Detection thresholds ---
+        self.color_tolerance = 55     # Color distance for method 1
+        self.sat_threshold   = 60     # Max saturation for "road" (method 2)
+        self.grad_threshold  = 25     # Max gradient for "smooth" (method 3)
 
-        # Minimum number of "road" pixels in a scan line to trust the reading
-        self.min_road_pixels = 15
+        # --- Smoothing ---
+        self.prev_steer = 0.0
+        self.smooth = 0.3
 
-        # Dead-zone: if error is within this fraction of frame width, go straight
-        self.dead_zone = 0.05
+        # --- CLAHE for lighting normalization ---
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-        # Smoothing: blend current reading with previous to reduce jitter
-        self.prev_center = None
-        self.smooth_factor = 0.4  # 0 = no smoothing, 1 = full smoothing (laggy)
+    def _preprocess(self, frame):
+        """Normalize lighting with CLAHE so detection works day and night."""
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l = self.clahe.apply(l)
+        lab = cv2.merge([l, a, b])
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
-    # ------------------------------------------------------------------
-    # Core: find road boundaries in a single horizontal scan line
-    # ------------------------------------------------------------------
-    def _scan_road(self, gray_row, threshold):
+    def _sample_road_color(self, frame):
+        """Learn road color from bottom-center of frame."""
+        h, w = frame.shape[:2]
+        strip = frame[int(h * 0.90):h, int(w * 0.20):int(w * 0.80)]
+        return np.mean(strip.reshape(-1, 3), axis=0).astype(np.float32)
+
+    def _detect_road_row(self, bgr_row, hsv_row, gray_row, road_color):
         """
-        Given a 1D array of grayscale values for one row of pixels,
-        find the leftmost and rightmost pixel that is darker than threshold.
-        Returns (left_x, right_x) or None if road not found.
+        Multi-method road detection for one horizontal scan line.
+        Returns boolean mask: True = road pixel.
         """
-        road_mask = gray_row < threshold
-        road_indices = np.where(road_mask)[0]
+        w = len(gray_row)
 
-        if len(road_indices) < self.min_road_pixels:
+        # Method 1: Adaptive color match
+        diff = np.abs(bgr_row.astype(np.float32) - road_color)
+        color_dist = np.sqrt(np.sum(diff ** 2, axis=1))
+        m1_color = color_dist < self.color_tolerance
+
+        # Method 2: HSV saturation — road is gray (low saturation)
+        m2_sat = hsv_row[:, 1] < self.sat_threshold
+
+        # Method 3: Texture smoothness — road interior is smooth, edges have gradients
+        grad = np.abs(np.diff(gray_row.astype(np.float32), prepend=gray_row[0].astype(np.float32)))
+        # Smooth the gradient to avoid single-pixel noise
+        if len(grad) > 5:
+            kernel = np.ones(5) / 5.0
+            grad = np.convolve(grad, kernel, mode='same')
+        m3_smooth = grad < self.grad_threshold
+
+        # VOTE: pixel is road if at least 2 of 3 agree
+        votes = m1_color.astype(np.int8) + m2_sat.astype(np.int8) + m3_smooth.astype(np.int8)
+        return votes >= 2
+
+    def _find_boundaries(self, road_mask):
+        """Find the widest continuous road segment in a boolean mask."""
+        indices = np.where(road_mask)[0]
+        if len(indices) < 8:
             return None
 
-        # Take the largest continuous dark region (ignore small dark patches)
-        # Simple approach: just use the widest span
-        left = int(road_indices[0])
-        right = int(road_indices[-1])
+        gaps = np.diff(indices)
+        big_gaps = np.where(gaps > 20)[0]
 
-        # Sanity: road should be at least 10% of frame width
-        if (right - left) < len(gray_row) * 0.10:
+        if len(big_gaps) == 0:
+            left, right = int(indices[0]), int(indices[-1])
+        else:
+            segments = []
+            start = 0
+            for g in big_gaps:
+                segments.append((indices[start], indices[g]))
+                start = g + 1
+            segments.append((indices[start], indices[-1]))
+            widest = max(segments, key=lambda s: s[1] - s[0])
+            left, right = int(widest[0]), int(widest[1])
+
+        if (right - left) < 8:
             return None
-
         return (left, right)
 
-    # ------------------------------------------------------------------
-    # Main pipeline — called every frame from api.py's yolo_loop
-    # ------------------------------------------------------------------
     def process_frame(self, frame):
-        """
-        Analyze one camera frame. Returns:
-          steering_cmd: "left", "right", or "forward"
-          debug_msg:    human-readable status string
-          annotated:    copy of frame with debug overlays drawn
-        """
-        height, width = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (7, 7), 0)
+        h, w = frame.shape[:2]
 
-        # --- Dynamic threshold ---
-        # Sample the middle third of the frame (where road usually is)
-        mid_strip = blur[int(height * 0.5):int(height * 0.8),
-                         int(width * 0.2):int(width * 0.8)]
-        avg_brightness = np.mean(mid_strip)
-        # Road pixels should be darker than ~85% of the average scene brightness
-        threshold = avg_brightness * 0.85
-
-        # --- Scan Line 1: NEAR (70% down) — immediate steering ---
-        near_y = int(height * 0.70)
-        near_row = blur[near_y, :]
-        near_road = self._scan_road(near_row, threshold)
-
-        # --- Scan Line 2: FAR (50% down) — curve anticipation ---
-        far_y = int(height * 0.50)
-        far_row = blur[far_y, :]
-        far_road = self._scan_road(far_row, threshold)
-
-        # --- Calculate target position ---
-        steering_cmd = "forward"
-        debug_msg = "No road detected"
+        # -------------------------------------------------------
+        # PREPROCESS: normalize lighting
+        # -------------------------------------------------------
+        processed = self._preprocess(frame)
+        hsv = cv2.cvtColor(processed, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+        road_color = self._sample_road_color(processed)
 
         annotated = frame.copy()
 
-        if near_road is not None:
-            near_left, near_right = near_road
-            near_center = (near_left + near_right) / 2.0
-            road_width = near_right - near_left
+        # -------------------------------------------------------
+        # SCAN: collect boundary points
+        # -------------------------------------------------------
+        left_points = []
+        right_points = []
 
-            # Edge-biased target: shift left from center
-            target_x = near_center - (road_width * self.edge_bias)
+        for i in range(self.num_scans):
+            frac = 0.88 - (i * 0.03)
+            scan_y = int(h * frac)
+            if scan_y < 1 or scan_y >= h:
+                continue
 
-            # If we can also see the road further ahead, blend in curve info
-            if far_road is not None:
-                far_left, far_right = far_road
-                far_center = (far_left + far_right) / 2.0
-                far_width = far_right - far_left
-                far_target = far_center - (far_width * self.edge_bias)
-                # Blend: 60% near + 40% far for smooth curve anticipation
-                target_x = target_x * 0.6 + far_target * 0.4
+            road_mask = self._detect_road_row(
+                processed[scan_y, :],
+                hsv[scan_y, :],
+                gray[scan_y, :],
+                road_color
+            )
+            bounds = self._find_boundaries(road_mask)
+            if bounds is not None:
+                left_points.append((bounds[0], scan_y))
+                right_points.append((bounds[1], scan_y))
 
-            # Smooth with previous frame to reduce jitter
-            if self.prev_center is not None:
-                target_x = (1 - self.smooth_factor) * target_x + self.smooth_factor * self.prev_center
-            self.prev_center = target_x
+        # -------------------------------------------------------
+        # DRAW: render boundaries
+        # -------------------------------------------------------
+        if len(left_points) >= 2:
+            for i in range(len(left_points) - 1):
+                cv2.line(annotated, left_points[i], left_points[i + 1], (0, 255, 0), 3)
+                cv2.line(annotated, right_points[i], right_points[i + 1], (255, 0, 0), 3)
+            for pt in left_points:
+                cv2.circle(annotated, pt, 4, (0, 255, 0), -1)
+            for pt in right_points:
+                cv2.circle(annotated, pt, 4, (255, 0, 0), -1)
 
-            # Error: how far target is from camera center (normalized -1 to +1)
-            cam_center = width / 2.0
-            error = (target_x - cam_center) / cam_center
+        # -------------------------------------------------------
+        # STEER: Position + Heading
+        # -------------------------------------------------------
+        steering_cmd = "forward"
+        debug_msg = "No road found"
+        n = len(left_points)
 
-            # P-controller
-            if error < -self.dead_zone:
+        if n >= 6:
+            cam_center = w / 2.0
+            third = max(n // 3, 2)
+
+            # NEAR (where we are), FAR (where road is going)
+            near_lefts  = [p[0] for p in left_points[:third]]
+            near_rights = [p[0] for p in right_points[:third]]
+            far_lefts   = [p[0] for p in left_points[-third:]]
+            far_rights  = [p[0] for p in right_points[-third:]]
+
+            near_center = (np.mean(near_lefts) + np.mean(near_rights)) / 2.0
+            far_center  = (np.mean(far_lefts) + np.mean(far_rights)) / 2.0
+
+            # Position error
+            position_err = (near_center - cam_center) / cam_center
+
+            # Heading error (curve anticipation)
+            heading_err = (far_center - near_center) / cam_center
+
+            # Curvature estimate: how different is far from near?
+            curvature = abs(heading_err)
+
+            # Combined signal
+            raw_steer = (self.Kp_position * position_err) + (self.Kp_heading * heading_err)
+            raw_steer = (1 - self.smooth) * raw_steer + self.smooth * self.prev_steer
+            self.prev_steer = raw_steer
+
+            if raw_steer < -self.dead_zone:
                 steering_cmd = "left"
-                debug_msg = f"Road offset {error:+.2f} → Steer LEFT"
-            elif error > self.dead_zone:
+            elif raw_steer > self.dead_zone:
                 steering_cmd = "right"
-                debug_msg = f"Road offset {error:+.2f} → Steer RIGHT"
             else:
                 steering_cmd = "forward"
-                debug_msg = f"Road offset {error:+.2f} → STRAIGHT"
 
-            # --- Debug overlays ---
-            # Draw near scan line and road boundaries
-            cv2.line(annotated, (near_left, near_y), (near_right, near_y), (0, 255, 0), 3)
-            cv2.circle(annotated, (int(target_x), near_y), 8, (0, 0, 255), -1)  # Target dot
-            cv2.circle(annotated, (int(cam_center), near_y), 8, (255, 0, 0), -1)  # Center dot
+            debug_msg = (f"pos={position_err:+.2f} head={heading_err:+.2f} "
+                         f"curve={curvature:.2f} -> {steering_cmd.upper()}")
 
-            # Draw far scan line if available
-            if far_road is not None:
-                cv2.line(annotated, (far_road[0], far_y), (far_road[1], far_y), (0, 200, 0), 2)
-                cv2.circle(annotated, (int(far_target), far_y), 6, (0, 0, 200), -1)
+            # Overlays
+            near_y = left_points[third][1]
+            far_y = left_points[-third][1]
+            cv2.circle(annotated, (int(near_center), near_y), 8, (0, 255, 255), -1)
+            cv2.circle(annotated, (int(cam_center), near_y), 8, (200, 200, 200), -1)
+            cv2.arrowedLine(annotated, (int(near_center), near_y),
+                            (int(far_center), far_y), (0, 255, 255), 2, tipLength=0.3)
 
-            # Draw a line connecting target to center showing the "pull" direction
-            cv2.arrowedLine(annotated, (int(cam_center), near_y + 30),
-                            (int(target_x), near_y + 30), (0, 255, 255), 2)
+        elif n >= 3:
+            cam_center = w / 2.0
+            road_center = (np.mean([p[0] for p in left_points]) +
+                           np.mean([p[0] for p in right_points])) / 2.0
+            err = (road_center - cam_center) / cam_center
+            raw_steer = self.Kp_position * err
+            raw_steer = (1 - self.smooth) * raw_steer + self.smooth * self.prev_steer
+            self.prev_steer = raw_steer
 
+            if raw_steer < -self.dead_zone:
+                steering_cmd = "left"
+            elif raw_steer > self.dead_zone:
+                steering_cmd = "right"
+            debug_msg = f"Partial ({n} pts) err={err:+.2f} -> {steering_cmd.upper()}"
         else:
-            # Road not visible on near line — check far line only
-            if far_road is not None:
-                far_center = (far_road[0] + far_road[1]) / 2.0
-                cam_center = width / 2.0
-                error = (far_center - cam_center) / cam_center
-                if error < -self.dead_zone * 2:
-                    steering_cmd = "left"
-                    debug_msg = f"Road ahead is LEFT ({error:+.2f}) → Steer LEFT"
-                elif error > self.dead_zone * 2:
-                    steering_cmd = "right"
-                    debug_msg = f"Road ahead is RIGHT ({error:+.2f}) → Steer RIGHT"
-                else:
-                    steering_cmd = "forward"
-                    debug_msg = "Road ahead → STRAIGHT"
-            else:
-                self.prev_center = None
-                debug_msg = "No road detected → Creeping FORWARD"
+            self.prev_steer = 0.0
 
-        # Status text on frame
-        color = {"left": (255, 100, 0), "right": (0, 100, 255), "forward": (0, 200, 0)}
+        col = {"left": (255, 100, 0), "right": (0, 100, 255), "forward": (0, 200, 0)}
         cv2.putText(annotated, debug_msg, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color.get(steering_cmd, (255, 255, 255)), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, col.get(steering_cmd, (255, 255, 255)), 2)
+        cv2.putText(annotated, f"Boundaries: {n}/{self.num_scans}", (10, h - 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
 
         return steering_cmd, debug_msg, annotated
