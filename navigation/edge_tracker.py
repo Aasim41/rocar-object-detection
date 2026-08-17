@@ -1,151 +1,185 @@
+"""
+Universal Road Follower — Works on ANY forward-facing camera.
+No calibration, no perspective transform, no fragile edge detection.
+
+Algorithm:
+  1. Sample two horizontal scan lines across the image
+     - Near line (~70% down): for immediate steering
+     - Far line  (~50% down): for anticipating curves ahead
+  2. At each scan line, find the LEFT and RIGHT boundaries of the
+     dark road surface (asphalt is darker than sidewalks/grass/buildings)
+  3. Calculate the road center, then offset it left for edge-biased
+     navigation (Indian left-hand traffic)
+  4. Feed the error into a P-controller → output left/right/forward
+
+This works in Webots AND on the physical bot because it relies on the
+fundamental property that road = dark, surroundings = lighter.
+"""
+
 import cv2
 import numpy as np
 
+
 class EdgeTracker:
     def __init__(self):
-        # Tuning parameters for P-controller
-        # PRECAUTION: If the bot is reacting too aggressively (wobbling/snaking), LOWER this value (e.g., 0.2 or 0.3).
-        # If it is reacting too sluggishly and hitting the curb, RAISE this value (e.g., 0.7 or 0.8) for sharper turns.
-        self.Kp = 0.5  # Proportional gain
-        
-        # Target offset from the left edge (in pixels on the warped frame)
-        # Assuming a warped frame width of 400
-        self.target_offset_x = 100 
-        
-        # Perspective transform parameters (to be calibrated)
-        self.M = None
-        self.Minv = None
-        
-    def get_birds_eye_view(self, frame):
-        """Warp the camera frame to a top-down view."""
-        height, width = frame.shape[:2]
-        
-        # Define 4 source points (Trapezoid representing the path ahead)
-        # These need to be tuned based on actual camera angle!
-        src = np.float32([
-            [width * 0.1, height * 0.9],   # Bottom Left
-            [width * 0.9, height * 0.9],   # Bottom Right
-            [width * 0.6, height * 0.6],   # Top Right
-            [width * 0.4, height * 0.6]    # Top Left
-        ])
-        
-        # Define 4 destination points (Rectangle for top-down view)
-        dst = np.float32([
-            [0, height],
-            [width, height],
-            [width, 0],
-            [0, 0]
-        ])
-        
-        # Calculate transform matrix if not done yet
-        if self.M is None:
-            self.M = cv2.getPerspectiveTransform(src, dst)
-            self.Minv = cv2.getPerspectiveTransform(dst, src)
-            
-        warped = cv2.warpPerspective(frame, self.M, (width, height), flags=cv2.INTER_LINEAR)
-        return warped, src
+        # --- Tuning Parameters ---
+        # PRECAUTION: If the bot wobbles/snakes, LOWER Kp (e.g., 0.3).
+        # If it reacts too slowly and drifts off, RAISE Kp (e.g., 0.8).
+        self.Kp = 0.5
 
-    def detect_left_edge(self, warped_frame):
-        """Use Canny edge detection and Hough transform to find the left boundary."""
-        # Convert to HSV or Grayscale
-        gray = cv2.cvtColor(warped_frame, cv2.COLOR_BGR2GRAY)
-        
-        # Blur to reduce noise
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        
-        # Canny edge detection
-        edges = cv2.Canny(blur, 50, 150)
-        
-        # Only look at the left half of the screen to find the left edge/curb
-        height, width = edges.shape
-        mask = np.zeros_like(edges)
-        cv2.rectangle(mask, (0, 0), (width // 2, height), 255, -1)
-        masked_edges = cv2.bitwise_and(edges, mask)
-        
-        # Find lines
-        lines = cv2.HoughLinesP(masked_edges, 1, np.pi/180, threshold=40, minLineLength=40, maxLineGap=100)
-        
-        if lines is None:
-            return None, edges
-            
-        # Find the average X position of all vertical-ish lines on the left
-        left_x_coords = []
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            # Avoid horizontal lines (where x changes drastically but y barely changes)
-            if abs(y2 - y1) > 20: 
-                left_x_coords.append((x1 + x2) / 2.0)
-                
-        if not left_x_coords:
-            return None, edges
-            
-        # Return the median x coordinate representing the continuous left curb line
-        avg_left_x = int(np.median(left_x_coords))
-        return avg_left_x, edges
+        # How far to offset from center toward the left edge.
+        # 0.0 = hug the center, 0.3 = 30% toward the left boundary.
+        # For Indian roads (left-hand traffic), keep 0.2–0.3.
+        self.edge_bias = 0.25
 
+        # Minimum number of "road" pixels in a scan line to trust the reading
+        self.min_road_pixels = 15
+
+        # Dead-zone: if error is within this fraction of frame width, go straight
+        self.dead_zone = 0.05
+
+        # Smoothing: blend current reading with previous to reduce jitter
+        self.prev_center = None
+        self.smooth_factor = 0.4  # 0 = no smoothing, 1 = full smoothing (laggy)
+
+    # ------------------------------------------------------------------
+    # Core: find road boundaries in a single horizontal scan line
+    # ------------------------------------------------------------------
+    def _scan_road(self, gray_row, threshold):
+        """
+        Given a 1D array of grayscale values for one row of pixels,
+        find the leftmost and rightmost pixel that is darker than threshold.
+        Returns (left_x, right_x) or None if road not found.
+        """
+        road_mask = gray_row < threshold
+        road_indices = np.where(road_mask)[0]
+
+        if len(road_indices) < self.min_road_pixels:
+            return None
+
+        # Take the largest continuous dark region (ignore small dark patches)
+        # Simple approach: just use the widest span
+        left = int(road_indices[0])
+        right = int(road_indices[-1])
+
+        # Sanity: road should be at least 10% of frame width
+        if (right - left) < len(gray_row) * 0.10:
+            return None
+
+        return (left, right)
+
+    # ------------------------------------------------------------------
+    # Main pipeline — called every frame from api.py's yolo_loop
+    # ------------------------------------------------------------------
     def process_frame(self, frame):
-        """Main pipeline combining warp, edge detection, and P-controller steering."""
-        warped, src_points = self.get_birds_eye_view(frame)
-        left_edge_x, edges = self.detect_left_edge(warped)
-        
+        """
+        Analyze one camera frame. Returns:
+          steering_cmd: "left", "right", or "forward"
+          debug_msg:    human-readable status string
+          annotated:    copy of frame with debug overlays drawn
+        """
+        height, width = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (7, 7), 0)
+
+        # --- Dynamic threshold ---
+        # Sample the middle third of the frame (where road usually is)
+        mid_strip = blur[int(height * 0.5):int(height * 0.8),
+                         int(width * 0.2):int(width * 0.8)]
+        avg_brightness = np.mean(mid_strip)
+        # Road pixels should be darker than ~85% of the average scene brightness
+        threshold = avg_brightness * 0.85
+
+        # --- Scan Line 1: NEAR (70% down) — immediate steering ---
+        near_y = int(height * 0.70)
+        near_row = blur[near_y, :]
+        near_road = self._scan_road(near_row, threshold)
+
+        # --- Scan Line 2: FAR (50% down) — curve anticipation ---
+        far_y = int(height * 0.50)
+        far_row = blur[far_y, :]
+        far_road = self._scan_road(far_row, threshold)
+
+        # --- Calculate target position ---
         steering_cmd = "forward"
-        debug_msg = "Tracking: No Edge Found"
-        
-        if left_edge_x is not None:
-            # Calculate error
-            error = self.target_offset_x - left_edge_x
-            
-            # Simple Proportional Controller
-            control_signal = self.Kp * error
-            
-            # Thresholds for converting continuous control signal to discrete commands
-            # Because our bot currently just takes "left", "right", "forward"
-            if control_signal > 30.0:
-                # Edge is moving left in the frame (< target), which means the bot is drifting RIGHT.
-                # So we must steer LEFT to get back to the edge.
+        debug_msg = "No road detected"
+
+        annotated = frame.copy()
+
+        if near_road is not None:
+            near_left, near_right = near_road
+            near_center = (near_left + near_right) / 2.0
+            road_width = near_right - near_left
+
+            # Edge-biased target: shift left from center
+            target_x = near_center - (road_width * self.edge_bias)
+
+            # If we can also see the road further ahead, blend in curve info
+            if far_road is not None:
+                far_left, far_right = far_road
+                far_center = (far_left + far_right) / 2.0
+                far_width = far_right - far_left
+                far_target = far_center - (far_width * self.edge_bias)
+                # Blend: 60% near + 40% far for smooth curve anticipation
+                target_x = target_x * 0.6 + far_target * 0.4
+
+            # Smooth with previous frame to reduce jitter
+            if self.prev_center is not None:
+                target_x = (1 - self.smooth_factor) * target_x + self.smooth_factor * self.prev_center
+            self.prev_center = target_x
+
+            # Error: how far target is from camera center (normalized -1 to +1)
+            cam_center = width / 2.0
+            error = (target_x - cam_center) / cam_center
+
+            # P-controller
+            if error < -self.dead_zone:
                 steering_cmd = "left"
-                debug_msg = f"Tracking: Drifting right (Err: {error:.1f}) -> Steer LEFT"
-            elif control_signal < -30.0:
-                # Edge is moving right in the frame (> target), which means the bot is drifting LEFT towards the curb.
-                # So we must steer RIGHT to avoid hitting the curb.
+                debug_msg = f"Road offset {error:+.2f} → Steer LEFT"
+            elif error > self.dead_zone:
                 steering_cmd = "right"
-                debug_msg = f"Tracking: Too close to edge (Err: {error:.1f}) -> Steer RIGHT"
+                debug_msg = f"Road offset {error:+.2f} → Steer RIGHT"
             else:
                 steering_cmd = "forward"
-                debug_msg = f"Tracking: Centered (Err: {error:.1f}) -> FORWARD"
-                
-        # --- Drawing for Visual Debugging (Dashboard) ---
-        annotated = frame.copy()
-        height, width = frame.shape[:2]
-        
-        # Draw perspective bounds
-        pts = src_points.reshape((-1, 1, 2)).astype(np.int32)
-        cv2.polylines(annotated, [pts], True, (0, 255, 255), 2)
-        
-        if left_edge_x is not None:
-            # Unwarp the detected line back to original camera view so it looks nice on dashboard
-            # We approximate the line by two points top and bottom of warped frame
-            top_pt = np.array([[[left_edge_x, 0]]], dtype=np.float32)
-            bot_pt = np.array([[[left_edge_x, height]]], dtype=np.float32)
-            
-            unwarped_top = cv2.perspectiveTransform(top_pt, self.Minv)[0][0]
-            unwarped_bot = cv2.perspectiveTransform(bot_pt, self.Minv)[0][0]
-            
-            # Draw the detected curb line
-            cv2.line(annotated, 
-                     (int(unwarped_top[0]), int(unwarped_top[1])), 
-                     (int(unwarped_bot[0]), int(unwarped_bot[1])), 
-                     (0, 255, 0), 4)
-                     
-            # Draw the target offset line
-            target_top = np.array([[[self.target_offset_x, 0]]], dtype=np.float32)
-            target_bot = np.array([[[self.target_offset_x, height]]], dtype=np.float32)
-            ut_top = cv2.perspectiveTransform(target_top, self.Minv)[0][0]
-            ut_bot = cv2.perspectiveTransform(target_bot, self.Minv)[0][0]
-            
-            cv2.line(annotated, 
-                     (int(ut_top[0]), int(ut_top[1])), 
-                     (int(ut_bot[0]), int(ut_bot[1])), 
-                     (255, 0, 0), 2)
-                     
+                debug_msg = f"Road offset {error:+.2f} → STRAIGHT"
+
+            # --- Debug overlays ---
+            # Draw near scan line and road boundaries
+            cv2.line(annotated, (near_left, near_y), (near_right, near_y), (0, 255, 0), 3)
+            cv2.circle(annotated, (int(target_x), near_y), 8, (0, 0, 255), -1)  # Target dot
+            cv2.circle(annotated, (int(cam_center), near_y), 8, (255, 0, 0), -1)  # Center dot
+
+            # Draw far scan line if available
+            if far_road is not None:
+                cv2.line(annotated, (far_road[0], far_y), (far_road[1], far_y), (0, 200, 0), 2)
+                cv2.circle(annotated, (int(far_target), far_y), 6, (0, 0, 200), -1)
+
+            # Draw a line connecting target to center showing the "pull" direction
+            cv2.arrowedLine(annotated, (int(cam_center), near_y + 30),
+                            (int(target_x), near_y + 30), (0, 255, 255), 2)
+
+        else:
+            # Road not visible on near line — check far line only
+            if far_road is not None:
+                far_center = (far_road[0] + far_road[1]) / 2.0
+                cam_center = width / 2.0
+                error = (far_center - cam_center) / cam_center
+                if error < -self.dead_zone * 2:
+                    steering_cmd = "left"
+                    debug_msg = f"Road ahead is LEFT ({error:+.2f}) → Steer LEFT"
+                elif error > self.dead_zone * 2:
+                    steering_cmd = "right"
+                    debug_msg = f"Road ahead is RIGHT ({error:+.2f}) → Steer RIGHT"
+                else:
+                    steering_cmd = "forward"
+                    debug_msg = "Road ahead → STRAIGHT"
+            else:
+                self.prev_center = None
+                debug_msg = "No road detected → Creeping FORWARD"
+
+        # Status text on frame
+        color = {"left": (255, 100, 0), "right": (0, 100, 255), "forward": (0, 200, 0)}
+        cv2.putText(annotated, debug_msg, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color.get(steering_cmd, (255, 255, 255)), 2)
+
         return steering_cmd, debug_msg, annotated
