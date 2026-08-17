@@ -29,10 +29,10 @@ import numpy as np
 class EdgeTracker:
     def __init__(self):
         # Steering
-        self.Kp = 1.2          # Position correction (react harder when off-center)
-        self.KH = 0.8          # Heading direction (look into turns more aggressively)
+        self.Kp = 1.5          # Position correction (very aggressive to stick to edge)
+        self.KH = 0.5          # Heading direction
         self.dead_zone = 0.02
-        self.margin = 0.08     # 8% from left edge
+        self.margin = 0.10     # 10% from left edge (hug the left boundary)
 
         # Detection
         self.canny_low = 30
