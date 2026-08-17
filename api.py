@@ -22,6 +22,9 @@ except ImportError:
 from navigation.pipeline import fetch_routes
 from navigation.navigate import navigate, calculate_bearing
 from navigation.fnpp import to_tuple
+from navigation.edge_tracker import EdgeTracker
+
+edge_tracker = EdgeTracker()
 
 # ============================================================
 # App Setup
@@ -242,6 +245,9 @@ def yolo_loop():
             results = model(frame, conf=0.50, verbose=False)
             ann = results[0].plot()
             
+            # ALWAYS process for edge tracking so the dashboard always shows the tracking lines
+            edge_cmd, edge_msg, ann = edge_tracker.process_frame(ann)
+            
             # Cache the annotated frame for the video feed
             with annotated_lock:
                 annotated_frame = ann
@@ -306,8 +312,9 @@ def yolo_loop():
                         send_esp32("forward")
                         obstacle_detected = False
                 else:
-                    nav_cmd = "forward"
-                    nav_msg = "Moving Forward (No GPS)"
+                    # Default to Edge-Biased Navigation when path is clear
+                    nav_cmd = edge_cmd
+                    nav_msg = edge_msg
                     
                     if current_route and live_location and (destination_location or source_location):
                         try:
@@ -340,12 +347,16 @@ def yolo_loop():
                                     source_location = None
                             else:
                                 nav_result = navigate(current_heading, live_location, current_route)
-                                nav_cmd = nav_result.get("command", "F")
+                                gps_cmd = nav_result.get("command", "F")
                                 
                                 # Map navigation commands to ESP32 commands
                                 cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
-                                nav_cmd = cmd_map.get(nav_cmd, "forward")
-                                nav_msg = f"GPS Steering: {nav_cmd.upper()}"
+                                gps_cmd = cmd_map.get(gps_cmd, "forward")
+                                
+                                # Override Edge Tracker ONLY if GPS explicitly requires a turn at an intersection
+                                if gps_cmd != "forward":
+                                    nav_cmd = gps_cmd
+                                    nav_msg = f"GPS Steering: {nav_cmd.upper()}"
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
