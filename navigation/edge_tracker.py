@@ -29,9 +29,8 @@ import numpy as np
 class EdgeTracker:
     def __init__(self):
         # Steering
-        self.Kp = 0.6          # Position correction
-        self.KH = 0.4          # Heading direction (linear shift)
-        self.Kd = 250.0        # Curvature anticipation
+        self.Kp = 0.8          # Position correction
+        self.KH = 0.5          # Heading direction
         self.dead_zone = 0.02
         self.margin = 0.08     # 8% from left edge
 
@@ -169,42 +168,36 @@ class EdgeTracker:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             return "forward", debug_msg, annotated
 
-        # Quadratic fit: center(y) = a*y² + b*y + c
-        ys = np.array([s['y'] for s in scan_data], dtype=np.float64)
-        cs = np.array([s['center'] for s in scan_data], dtype=np.float64)
+        # Simple robust Look-ahead
+        third = max(n // 3, 1)
+        near_left = np.mean([s['left'] for s in scan_data[:third]])
+        near_width = np.mean([s['width'] for s in scan_data[:third]])
+        near_target = near_left + self.margin * near_width
+        near_center = np.mean([s['center'] for s in scan_data[:third]])
+        near_target = min(near_target, near_center)
 
-        y_min, y_max = ys.min(), ys.max()
-        y_range = y_max - y_min + 1e-6
-        y_norm = (ys - y_min) / y_range
+        far_left = np.mean([s['left'] for s in scan_data[-third:]])
+        far_width = np.mean([s['width'] for s in scan_data[-third:]])
+        far_target = far_left + self.margin * far_width
+        far_center = np.mean([s['center'] for s in scan_data[-third:]])
+        far_target = min(far_target, far_center)
 
-        coeffs = np.polyfit(y_norm, cs, 2)
-        curvature = coeffs[0]  # a = curvature (quadratic)
-        heading = coeffs[1]    # b = heading (linear)
-        curv_norm = curvature / w
-        head_norm = heading / w
+        cam_center = w / 2.0
+        pos_err = (near_target - cam_center) / cam_center
+        head_err = (far_target - near_target) / cam_center
 
-        # Turn classification uses BOTH heading and curvature
-        turn_score = abs(head_norm) + abs(curv_norm)
-        if turn_score < 0.002:
+        # Turn classification
+        turn_score = abs(head_err)
+        if turn_score < 0.05:
             turn_type = "STRAIGHT"
-        elif turn_score < 0.008:
+        elif turn_score < 0.15:
             turn_type = "GENTLE CURVE"
-        elif turn_score < 0.020:
+        elif turn_score < 0.30:
             turn_type = "CURVE"
         else:
             turn_type = "SHARP TURN"
 
-        # Target position: left edge + margin
-        near = scan_data[0]
-        target_x = near['left'] + self.margin * near['width']
-        target_x = min(target_x, near['center'])  # Clamp to center
-
-        cam_center = w / 2.0
-        pos_err = (target_x - cam_center) / cam_center
-        head_err = head_norm * self.KH
-        curve_err = curv_norm * self.Kd
-
-        raw_steer = self.Kp * pos_err + head_err + curve_err
+        raw_steer = self.Kp * pos_err + self.KH * head_err
         raw_steer = (1 - self.smooth) * raw_steer + self.smooth * self.prev_steer
         self.prev_steer = raw_steer
 
@@ -212,19 +205,12 @@ class EdgeTracker:
             steering_cmd = "left"
         elif raw_steer > self.dead_zone:
             steering_cmd = "right"
-
-        debug_msg = (f"{turn_type} | W={near['width']:.0f}px ({near['width']/w*100:.0f}%) "
-                     f"pos={pos_err:+.2f} curv={curv_norm:+.4f} -> {steering_cmd.upper()}")
-
-        # Draw fitted curve
-        for t in np.linspace(0, 1, 40):
-            cx = int(coeffs[0] * t**2 + coeffs[1] * t + coeffs[2])
-            cy = int(t * y_range + y_min)
-            if 0 <= cx < w and 0 <= cy < h:
-                cv2.circle(annotated, (cx, cy), 3, (0, 255, 255), -1)
+        near = scan_data[0]
+        debug_msg = (f"{turn_type} | W={near['width']:.0f}px "
+                     f"pos={pos_err:+.2f} head={head_err:+.3f} -> {steering_cmd.upper()}")
 
         # Draw target
-        cv2.circle(annotated, (int(target_x), near['y']), 10, (0, 0, 255), -1)
+        cv2.circle(annotated, (int(near_target), near['y']), 10, (0, 0, 255), -1)
         cv2.circle(annotated, (int(cam_center), near['y']), 8, (255, 255, 255), 2)
         cv2.line(annotated, (near['left'], near['y'] + 12),
                  (near['right'], near['y'] + 12), (0, 200, 200), 2)
