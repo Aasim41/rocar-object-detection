@@ -71,6 +71,7 @@ current_mode = "autonomous"  # "autonomous" or "manual"
 current_status = "INITIALIZING"
 latest_log = "System starting up..."
 obstacle_detected = False
+prev_area_ratio = 0.0  # Tracks object size growth between frames (fast approach detection)
 current_distance_cm = 999
 log_history = []
 esp_commands = []
@@ -232,7 +233,7 @@ def camera_loop():
 # ============================================================
 def yolo_loop():
     """Single YOLO loop: runs inference once and caches the annotated frame."""
-    global current_status, obstacle_detected, current_distance_cm, annotated_frame, current_route, destination_location, source_location, active_phase, cargo_state
+    global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, current_route, destination_location, source_location, active_phase, cargo_state
     add_log("🤖 YOLO loop started")
     
     try:
@@ -266,81 +267,129 @@ def yolo_loop():
                 boxes = results[0].boxes
                 
                 if len(boxes) > 0:
-                    # ─── OBSTACLE AVOIDANCE (NEVER STOP) ───
-                    # Find the CLOSEST (largest) object in the frame
-                    largest_box = None
-                    max_area = 0
+                    # ─── SMART OBSTACLE AVOIDANCE ───
+                    # 1) Build an occupancy map across the frame width
+                    #    For each pixel column, mark if ANY bounding box covers it
+                    occupancy = np.zeros(width, dtype=np.float32)
+                    total_obstacle_area = 0
+                    closest_name = ""
+                    
                     for box_data in boxes:
                         b = box_data.xyxy[0].cpu().numpy()
+                        bx_left = max(0, int(b[0]))
+                        bx_right = min(width, int(b[2]))
+                        bx_height_ratio = (b[3] - b[1]) / height  # How tall (= how close)
+                        
+                        # Weight by closeness: taller box = closer = more dangerous
+                        occupancy[bx_left:bx_right] = np.maximum(
+                            occupancy[bx_left:bx_right], bx_height_ratio
+                        )
+                        
                         area = (b[2] - b[0]) * (b[3] - b[1])
-                        if area > max_area:
-                            max_area = area
-                            largest_box = box_data
+                        total_obstacle_area += area
+                        if area > 0 and (not closest_name or bx_height_ratio > 0.3):
+                            cid = int(box_data.cls[0])
+                            closest_name = model.names[cid]
                     
-                    box = largest_box.xyxy[0].cpu().numpy()
-                    obj_left = box[0]
-                    obj_right = box[2]
-                    obj_center_x = (obj_left + obj_right) / 2.0
-                    class_id = int(largest_box.cls[0])
-                    class_name = model.names[class_id]
+                    total_area_ratio = total_obstacle_area / frame_area
                     
-                    # How close is the object? (area ratio)
-                    area_ratio = max_area / frame_area
+                    # 2) Fast approach detection: compare with previous frame
+                    growth_rate = total_area_ratio - prev_area_ratio
+                    prev_area_ratio = total_area_ratio
+                    is_fast_approaching = growth_rate > 0.03  # Growing >3% per frame = fast
                     
-                    # How much free space on each side?
-                    free_left = obj_left           # pixels of free space on the left
-                    free_right = width - obj_right  # pixels of free space on the right
+                    # 3) Find the WIDEST GAP (consecutive columns with low occupancy)
+                    free = (occupancy < 0.15).astype(np.uint8)  # Columns with no/small obstacle
                     
-                    if area_ratio < 0.03:
-                        # Object is FAR away — ignore it, full speed
-                        current_status = f"⬆️ {class_name} far — FORWARD"
+                    # Find runs of free space
+                    best_gap_start = 0
+                    best_gap_len = 0
+                    current_gap_start = 0
+                    current_gap_len = 0
+                    
+                    for col in range(width):
+                        if free[col]:
+                            if current_gap_len == 0:
+                                current_gap_start = col
+                            current_gap_len += 1
+                        else:
+                            if current_gap_len > best_gap_len:
+                                best_gap_len = current_gap_len
+                                best_gap_start = current_gap_start
+                            current_gap_len = 0
+                    if current_gap_len > best_gap_len:
+                        best_gap_len = current_gap_len
+                        best_gap_start = current_gap_start
+                    
+                    gap_center = best_gap_start + best_gap_len / 2.0
+                    gap_ratio = best_gap_len / width  # How wide is the gap (0-1)
+                    frame_center = width / 2.0
+                    
+                    # 4) Decision logic
+                    if is_fast_approaching and total_area_ratio > 0.05:
+                        # FAST APPROACHING — react immediately regardless of size
+                        send_esp32("slow")
+                        if gap_ratio > 0.15:
+                            # There's a gap — steer through it NOW
+                            if gap_center < frame_center:
+                                current_status = f"⚡ FAST {closest_name} — DODGE LEFT"
+                                add_log(f"YOLO: {closest_name} FAST → dodge LEFT")
+                                send_esp32("left")
+                            else:
+                                current_status = f"⚡ FAST {closest_name} — DODGE RIGHT"
+                                add_log(f"YOLO: {closest_name} FAST → dodge RIGHT")
+                                send_esp32("right")
+                        else:
+                            # No gap — emergency stop
+                            current_status = f"🛑 FAST {closest_name} — EMERGENCY STOP"
+                            add_log(f"YOLO: {closest_name} FAST, no gap → STOP")
+                            send_esp32("stop")
+                        obstacle_detected = True
+                    
+                    elif total_area_ratio > 0.50:
+                        # TOO CLOSE — EMERGENCY STOP
+                        current_status = f"🛑 {closest_name} TOO CLOSE — STOP"
+                        add_log(f"YOLO: {closest_name} COLLISION RISK → STOP")
+                        send_esp32("stop")
+                        obstacle_detected = True
+                    
+                    elif gap_ratio < 0.10:
+                        # Road is FULLY BLOCKED (no gap wide enough) — stop
+                        current_status = f"🛑 Road blocked — STOP"
+                        add_log(f"YOLO: Multiple obstacles, no gap → STOP")
+                        send_esp32("stop")
+                        obstacle_detected = True
+                    
+                    elif total_area_ratio < 0.03:
+                        # Objects are FAR — full speed
+                        current_status = f"⬆️ {closest_name} far — FORWARD"
                         send_esp32("forward")
                         obstacle_detected = False
                     
-                    elif area_ratio < 0.10:
-                        # Object APPROACHING — slow down, start gentle avoidance
-                        send_esp32("slow")  # Reduce speed first
-                        if free_left > free_right:
-                            current_status = f"🐢 {class_name} ahead — SLOW + LEFT"
-                            add_log(f"YOLO: {class_name} approaching → slow + LEFT")
-                            send_esp32("left")
-                        else:
-                            current_status = f"🐢 {class_name} ahead — SLOW + RIGHT"
-                            add_log(f"YOLO: {class_name} approaching → slow + RIGHT")
-                            send_esp32("right")
-                        obstacle_detected = True
-                    
-                    elif area_ratio < 0.30:
-                        # Object is CLOSE — slow down hard, steer around
+                    elif total_area_ratio < 0.15:
+                        # APPROACHING — slow + steer through gap
                         send_esp32("slow")
-                        if free_left > free_right:
-                            current_status = f"⬅️ CLOSE {class_name} — SLOW + HARD LEFT"
-                            add_log(f"YOLO: {class_name} close → slow + hard LEFT")
+                        if gap_center < frame_center:
+                            current_status = f"🐢 Avoiding — SLOW + LEFT (gap {gap_ratio:.0%})"
+                            add_log(f"YOLO: {closest_name} → slow + LEFT through gap")
                             send_esp32("left")
                         else:
-                            current_status = f"➡️ CLOSE {class_name} — SLOW + HARD RIGHT"
-                            add_log(f"YOLO: {class_name} close → slow + hard RIGHT")
-                            send_esp32("right")
-                        obstacle_detected = True
-                    
-                    elif area_ratio < 0.50:
-                        # Object VERY CLOSE (30-50%) — emergency slow + steer
-                        send_esp32("slow")
-                        if free_left > free_right:
-                            current_status = f"🚨 {class_name} DANGER — SLOW + LEFT"
-                            add_log(f"YOLO: {class_name} DANGER → slow + emergency LEFT")
-                            send_esp32("left")
-                        else:
-                            current_status = f"🚨 {class_name} DANGER — SLOW + RIGHT"
-                            add_log(f"YOLO: {class_name} DANGER → slow + emergency RIGHT")
+                            current_status = f"🐢 Avoiding — SLOW + RIGHT (gap {gap_ratio:.0%})"
+                            add_log(f"YOLO: {closest_name} → slow + RIGHT through gap")
                             send_esp32("right")
                         obstacle_detected = True
                     
                     else:
-                        # Object TOO CLOSE (>50%) — EMERGENCY STOP to avoid collision
-                        current_status = f"🛑 {class_name} TOO CLOSE — EMERGENCY STOP"
-                        add_log(f"YOLO: {class_name} COLLISION RISK → EMERGENCY STOP")
-                        send_esp32("stop")
+                        # CLOSE — slow + hard steer through gap
+                        send_esp32("slow")
+                        if gap_center < frame_center:
+                            current_status = f"⬅️ CLOSE — SLOW + HARD LEFT (gap {gap_ratio:.0%})"
+                            add_log(f"YOLO: {closest_name} close → slow + hard LEFT")
+                            send_esp32("left")
+                        else:
+                            current_status = f"➡️ CLOSE — SLOW + HARD RIGHT (gap {gap_ratio:.0%})"
+                            add_log(f"YOLO: {closest_name} close → slow + hard RIGHT")
+                            send_esp32("right")
                         obstacle_detected = True
                 
                 else:
