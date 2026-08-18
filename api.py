@@ -292,44 +292,47 @@ def yolo_loop():
                     free_right = width - obj_right  # pixels of free space on the right
                     
                     if area_ratio < 0.03:
-                        # Object is FAR away — ignore it, keep moving
-                        current_status = f"⬆️ {class_name} far away — FORWARD"
+                        # Object is FAR away — ignore it, full speed
+                        current_status = f"⬆️ {class_name} far — FORWARD"
                         send_esp32("forward")
                         obstacle_detected = False
                     
-                    elif area_ratio < 0.15:
-                        # Object is APPROACHING — start gentle avoidance
+                    elif area_ratio < 0.10:
+                        # Object APPROACHING — slow down, start gentle avoidance
+                        send_esp32("slow")  # Reduce speed first
                         if free_left > free_right:
-                            current_status = f"↙️ Avoiding {class_name} — STEER LEFT"
-                            add_log(f"YOLO: {class_name} approaching → gentle LEFT")
+                            current_status = f"🐢 {class_name} ahead — SLOW + LEFT"
+                            add_log(f"YOLO: {class_name} approaching → slow + LEFT")
                             send_esp32("left")
                         else:
-                            current_status = f"↘️ Avoiding {class_name} — STEER RIGHT"
-                            add_log(f"YOLO: {class_name} approaching → gentle RIGHT")
+                            current_status = f"🐢 {class_name} ahead — SLOW + RIGHT"
+                            add_log(f"YOLO: {class_name} approaching → slow + RIGHT")
                             send_esp32("right")
                         obstacle_detected = True
                     
-                    elif area_ratio < 0.40:
-                        # Object is CLOSE — hard avoidance, slow down
+                    elif area_ratio < 0.30:
+                        # Object is CLOSE — slow down hard, steer around
+                        send_esp32("slow")
                         if free_left > free_right:
-                            current_status = f"⬅️ CLOSE {class_name} — HARD LEFT"
-                            add_log(f"YOLO: {class_name} close → hard LEFT")
+                            current_status = f"⬅️ CLOSE {class_name} — SLOW + HARD LEFT"
+                            add_log(f"YOLO: {class_name} close → slow + hard LEFT")
                             send_esp32("left")
                         else:
-                            current_status = f"➡️ CLOSE {class_name} — HARD RIGHT"
-                            add_log(f"YOLO: {class_name} close → hard RIGHT")
+                            current_status = f"➡️ CLOSE {class_name} — SLOW + HARD RIGHT"
+                            add_log(f"YOLO: {class_name} close → slow + hard RIGHT")
                             send_esp32("right")
                         obstacle_detected = True
                     
                     else:
-                        # Object is VERY CLOSE (>40% of frame) — emergency avoidance
+                        # Object VERY CLOSE (>30% of frame) — emergency slow + steer
+                        send_esp32("slow")
                         if free_left > free_right:
-                            current_status = f"🚨 EMERGENCY — HARD LEFT"
-                            add_log(f"YOLO: {class_name} DANGER → emergency LEFT")
+                            current_status = f"🚨 {class_name} DANGER — SLOW + LEFT"
+                            add_log(f"YOLO: {class_name} DANGER → slow + emergency LEFT")
                             send_esp32("left")
                         else:
-                            current_status = f"🚨 EMERGENCY — HARD RIGHT"
-                            add_log(f"YOLO: {class_name} DANGER → emergency RIGHT")
+                            current_status = f"🚨 {class_name} DANGER — SLOW + RIGHT"
+                            add_log(f"YOLO: {class_name} DANGER → slow + emergency RIGHT")
                             send_esp32("right")
                         obstacle_detected = True
                 
