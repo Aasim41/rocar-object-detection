@@ -23,9 +23,6 @@ except ImportError:
 from navigation.pipeline import fetch_routes
 from navigation.navigate import navigate, calculate_bearing
 from navigation.fnpp import to_tuple
-from navigation.edge_tracker import EdgeTracker
-
-edge_tracker = EdgeTracker()
 
 # ============================================================
 # App Setup
@@ -258,9 +255,6 @@ def yolo_loop():
             results = model(frame, conf=0.50, verbose=False)
             ann = results[0].plot()
             
-            # ALWAYS process for edge tracking so the dashboard always shows the tracking lines
-            edge_cmd, edge_msg, ann = edge_tracker.process_frame(ann)
-            
             # Cache the annotated frame for the video feed
             with annotated_lock:
                 annotated_frame = ann
@@ -268,66 +262,81 @@ def yolo_loop():
             # Only do navigation logic in autonomous mode
             if current_mode == "autonomous":
                 height, width, _ = frame.shape
-                frame_center_x = width // 2
+                frame_area = height * width
                 boxes = results[0].boxes
                 
                 if len(boxes) > 0:
-                    # Find the largest bounding box in the frame
-                    largest_box = boxes[0]
-                    b0 = largest_box.xyxy[0].cpu().numpy()
-                    max_area = (b0[2] - b0[0]) * (b0[3] - b0[1])
-                    for box_data in boxes[1:]:
+                    # ─── OBSTACLE AVOIDANCE (NEVER STOP) ───
+                    # Find the CLOSEST (largest) object in the frame
+                    largest_box = None
+                    max_area = 0
+                    for box_data in boxes:
                         b = box_data.xyxy[0].cpu().numpy()
                         area = (b[2] - b[0]) * (b[3] - b[1])
                         if area > max_area:
                             max_area = area
                             largest_box = box_data
-                            
+                    
                     box = largest_box.xyxy[0].cpu().numpy()
-                    obj_center_x = int((box[0] + box[2]) / 2)
-                    obj_area = max_area
-                    bbox_height = box[3] - box[1]
-                    class_id = int(largest_box.cls[0])
-                    class_name = model.names[class_id]
-                    confidence = float(largest_box.conf[0])
-                    
-                    # Check zones
-                    left_zone = width * 0.35
-                    right_zone = width * 0.65
-                    
                     obj_left = box[0]
                     obj_right = box[2]
+                    obj_center_x = (obj_left + obj_right) / 2.0
+                    class_id = int(largest_box.cls[0])
+                    class_name = model.names[class_id]
                     
-                    if obj_right > left_zone and obj_left < right_zone:
-                        # Object is overlapping the center pathway
-                        current_status = f"⚠️ {class_name} IN PATH"
-                        add_log(f"YOLO: {class_name} blocking -> STOP")
-                        send_esp32("stop")
-                        obstacle_detected = True
-                    elif obj_center_x < left_zone:
-                        # Object is on the left, steer right to avoid
-                        current_status = "➡️ AVOIDING (STEER RIGHT)"
-                        add_log(f"YOLO: {class_name} on left -> Avoiding Right")
-                        send_esp32("right")
-                        obstacle_detected = True
-                    elif obj_center_x > right_zone:
-                        # Object is on the right, steer left to avoid
-                        current_status = "⬅️ AVOIDING (STEER LEFT)"
-                        add_log(f"YOLO: {class_name} on right -> Avoiding Left")
-                        send_esp32("left")
-                        obstacle_detected = True
-                    else:
-                        # Object is centered but not too close yet
-                        current_status = f"⬆️ MOVING FORWARD"
-                        frame_area = height * width
-                        area_ratio = max_area / frame_area if frame_area > 0 else 0
-                        add_log(f"YOLO: {class_name} centered ({area_ratio:.0%}) -> Moving Forward")
+                    # How close is the object? (area ratio)
+                    area_ratio = max_area / frame_area
+                    
+                    # How much free space on each side?
+                    free_left = obj_left           # pixels of free space on the left
+                    free_right = width - obj_right  # pixels of free space on the right
+                    
+                    if area_ratio < 0.03:
+                        # Object is FAR away — ignore it, keep moving
+                        current_status = f"⬆️ {class_name} far away — FORWARD"
                         send_esp32("forward")
                         obstacle_detected = False
+                    
+                    elif area_ratio < 0.15:
+                        # Object is APPROACHING — start gentle avoidance
+                        if free_left > free_right:
+                            current_status = f"↙️ Avoiding {class_name} — STEER LEFT"
+                            add_log(f"YOLO: {class_name} approaching → gentle LEFT")
+                            send_esp32("left")
+                        else:
+                            current_status = f"↘️ Avoiding {class_name} — STEER RIGHT"
+                            add_log(f"YOLO: {class_name} approaching → gentle RIGHT")
+                            send_esp32("right")
+                        obstacle_detected = True
+                    
+                    elif area_ratio < 0.40:
+                        # Object is CLOSE — hard avoidance, slow down
+                        if free_left > free_right:
+                            current_status = f"⬅️ CLOSE {class_name} — HARD LEFT"
+                            add_log(f"YOLO: {class_name} close → hard LEFT")
+                            send_esp32("left")
+                        else:
+                            current_status = f"➡️ CLOSE {class_name} — HARD RIGHT"
+                            add_log(f"YOLO: {class_name} close → hard RIGHT")
+                            send_esp32("right")
+                        obstacle_detected = True
+                    
+                    else:
+                        # Object is VERY CLOSE (>40% of frame) — emergency avoidance
+                        if free_left > free_right:
+                            current_status = f"🚨 EMERGENCY — HARD LEFT"
+                            add_log(f"YOLO: {class_name} DANGER → emergency LEFT")
+                            send_esp32("left")
+                        else:
+                            current_status = f"🚨 EMERGENCY — HARD RIGHT"
+                            add_log(f"YOLO: {class_name} DANGER → emergency RIGHT")
+                            send_esp32("right")
+                        obstacle_detected = True
+                
                 else:
-                    # Default to Edge-Biased Navigation when path is clear
-                    nav_cmd = edge_cmd
-                    nav_msg = edge_msg
+                    # ─── PATH CLEAR — GO FORWARD (or follow GPS) ───
+                    nav_cmd = "forward"
+                    nav_msg = "Path clear → FORWARD"
                     
                     if current_route and live_location and (destination_location or source_location):
                         try:
@@ -344,38 +353,35 @@ def yolo_loop():
                                 send_esp32("stop")
                                 
                                 if active_phase == "PICKUP":
-                                    nav_msg = "🏪 AT SHOP -> WAITING FOR PACKING"
+                                    nav_msg = "🏪 AT SHOP → WAITING FOR PACKING"
                                     current_status = nav_msg
                                     send_esp32("unlock")
                                     cargo_state = "OPEN"
                                     active_phase = "AWAITING_PACKING"
                                     current_route = []
                                 else:
-                                    nav_msg = "🎯 DESTINATION REACHED -> WAITING FOR OTP"
+                                    nav_msg = "🎯 DESTINATION REACHED → WAITING FOR OTP"
                                     current_status = nav_msg
-                                    # Removed send_esp32("unlock") - User will unlock via OTP
                                     active_phase = "IDLE"
-                                    current_route = []  # Clear route
+                                    current_route = []
                                     destination_location = None
                                     source_location = None
                             else:
                                 nav_result = navigate(current_heading, live_location, current_route)
                                 gps_cmd = nav_result.get("command", "F")
                                 
-                                # Map navigation commands to ESP32 commands
                                 cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
                                 gps_cmd = cmd_map.get(gps_cmd, "forward")
                                 
-                                # Override Edge Tracker ONLY if GPS explicitly requires a turn at an intersection
                                 if gps_cmd != "forward":
                                     nav_cmd = gps_cmd
                                     nav_msg = f"GPS Steering: {nav_cmd.upper()}"
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
-                    if current_status != f"✅ PATH CLEAR -> {nav_cmd.upper()}":
-                        add_log(f"✅ Path clear -> {nav_msg}")
-                    current_status = f"✅ PATH CLEAR -> {nav_cmd.upper()}"
+                    if current_status != f"✅ PATH CLEAR → {nav_cmd.upper()}":
+                        add_log(f"✅ {nav_msg}")
+                    current_status = f"✅ PATH CLEAR → {nav_cmd.upper()}"
                     current_distance_cm = 999
                     send_esp32(nav_cmd)
                     obstacle_detected = False
@@ -605,3 +611,7 @@ def startup():
     add_log("👂 ESP32 listener thread started")
     
     add_log("✅ All systems initialized!")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
