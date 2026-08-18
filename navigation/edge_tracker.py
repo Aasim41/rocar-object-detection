@@ -32,7 +32,7 @@ class EdgeTracker:
         self.Kp = 0.8          # Position correction (smoothed to prevent oversteer)
         self.KH = 0.5          # Heading direction
         self.dead_zone = 0.02
-        self.margin = 0.10     # 10% from left edge (hug the left boundary)
+        self.margin = 0.30     # 30% from left = left lane, not boundary, not center
 
         # Detection
         self.canny_low = 30
