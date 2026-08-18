@@ -32,13 +32,13 @@ class EdgeTracker:
         self.Kp = 0.8          # Position correction (smoothed to prevent oversteer)
         self.KH = 0.5          # Heading direction
         self.dead_zone = 0.02
-        self.margin = 0.22     # 22% from left = slightly closer to the left edge
+        self.margin = 0.25     # 25% from left = left lane
 
         # Detection
-        self.canny_low = 30
-        self.canny_high = 90
-        self.fill_tolerance = 25  # Can be generous because edges block leaks
-        self.blur_size = 21
+        self.canny_low = 50    # Higher = fewer internal edges
+        self.canny_high = 120
+        self.fill_tolerance = 35  # Higher = flood fill covers full road width
+        self.blur_size = 31    # Heavier blur kills lane markings and shadows
 
         # Smoothing
         self.prev_steer = 0.0
@@ -173,14 +173,10 @@ class EdgeTracker:
         near_left = np.mean([s['left'] for s in scan_data[:third]])
         near_width = np.mean([s['width'] for s in scan_data[:third]])
         near_target = near_left + self.margin * near_width
-        near_center = np.mean([s['center'] for s in scan_data[:third]])
-        near_target = min(near_target, near_center)
 
         far_left = np.mean([s['left'] for s in scan_data[-third:]])
         far_width = np.mean([s['width'] for s in scan_data[-third:]])
         far_target = far_left + self.margin * far_width
-        far_center = np.mean([s['center'] for s in scan_data[-third:]])
-        far_target = min(far_target, far_center)
 
         cam_center = w / 2.0
         pos_err = (near_target - cam_center) / cam_center
