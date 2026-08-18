@@ -323,8 +323,8 @@ def yolo_loop():
                             send_esp32("right")
                         obstacle_detected = True
                     
-                    else:
-                        # Object VERY CLOSE (>30% of frame) — emergency slow + steer
+                    elif area_ratio < 0.50:
+                        # Object VERY CLOSE (30-50%) — emergency slow + steer
                         send_esp32("slow")
                         if free_left > free_right:
                             current_status = f"🚨 {class_name} DANGER — SLOW + LEFT"
@@ -334,6 +334,13 @@ def yolo_loop():
                             current_status = f"🚨 {class_name} DANGER — SLOW + RIGHT"
                             add_log(f"YOLO: {class_name} DANGER → slow + emergency RIGHT")
                             send_esp32("right")
+                        obstacle_detected = True
+                    
+                    else:
+                        # Object TOO CLOSE (>50%) — EMERGENCY STOP to avoid collision
+                        current_status = f"🛑 {class_name} TOO CLOSE — EMERGENCY STOP"
+                        add_log(f"YOLO: {class_name} COLLISION RISK → EMERGENCY STOP")
+                        send_esp32("stop")
                         obstacle_detected = True
                 
                 else:
