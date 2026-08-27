@@ -21,8 +21,8 @@ import time
 # --- Configuration ---
 BACKEND_URL = "http://127.0.0.1:8000"
 CAMERA_NAME = "camera"  # Change if your webots camera is named differently
-CRUISING_SPEED = 20.0   # km/h
-STEERING_ANGLE = 0.3    # Radians for sharp turns
+CRUISING_SPEED = 35.0   # km/h
+STEERING_ANGLE = 0.2    # Radians for sharp turns (reduced slightly so it doesn't spin out at higher speeds)
 
 # --- Initialization ---
 driver = Driver()
@@ -73,11 +73,14 @@ while driver.step() != -1:
         if cmd == "forward":
             driver.setCruisingSpeed(CRUISING_SPEED)
             driver.setSteeringAngle(0.0)
+        elif cmd == "slow":
+            driver.setCruisingSpeed(CRUISING_SPEED * 0.4)  # 40% speed when slowing
+            driver.setSteeringAngle(0.0)
         elif cmd == "left":
-            driver.setCruisingSpeed(CRUISING_SPEED - 5)  # Slow down slightly for turns
+            driver.setCruisingSpeed(CRUISING_SPEED * 0.7)  # Slow down slightly for turns
             driver.setSteeringAngle(-STEERING_ANGLE)
         elif cmd == "right":
-            driver.setCruisingSpeed(CRUISING_SPEED - 5)
+            driver.setCruisingSpeed(CRUISING_SPEED * 0.7)
             driver.setSteeringAngle(STEERING_ANGLE)
         elif cmd == "stop":
             driver.setCruisingSpeed(0.0)

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RoCAR Delivery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono&family=Orbitron:wght@600&display=swap" rel="stylesheet">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBX0xNBFK24V2DZgMQHFku3tWcJWtVjgds&libraries=places"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --accent-blue: #0ea5e9;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --surface: #1e293b;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        h1, h2, h3 { font-family: 'Orbitron', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            z-index: 10;
+            background-color: var(--bg-dark);
+        }
+
+        .screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(20px);
+            z-index: 1;
+        }
+
+        /* Screen 1: Order Form */
+        #screen-order .header {
+            padding: 20px;
+            text-align: center;
+            background-color: var(--surface);
+            border-bottom: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .form-container {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background-color: var(--surface);
+            z-index: 20;
+        }
+
+        .input-group {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 15px;
+            font-size: 1.2rem;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 15px 15px 15px 45px;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        input[type="text"]:focus {
+            border-color: var(--accent-blue);
+        }
+
+        #order-map-container {
+            flex-grow: 1;
+            width: 100%;
+            position: relative;
+        }
+        
+        #order-map { width: 100%; height: 100%; }
+
+        .btn {
+            background-color: var(--accent-blue);
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            width: 100%;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 5px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .btn:active { background-color: #0284c7; transform: translateY(1px); }
+        .btn:disabled { background-color: #475569; color: #94a3b8; cursor: not-allowed; }
+
+        /* Screen 2: Tracking */
+        #screen-track .header-status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 15px 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            z-index: 20;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        #status-text {
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #eta-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+            color: var(--accent-blue);
+        }
+
+        #track-map-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0; left: 0; z-index: 1;
+        }
+        
+        #track-map { width: 100%; height: 100%; }
+
+        #unlock-container {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            right: 20px;
+            background: var(--surface);
+            border-radius: 16px;
+            padding: 20px;
+            z-index: 20;
+            display: none;
+            flex-direction: column;
+            gap: 15px;
+            box-shadow: 0 -10px 20px rgba(0,0,0,0.5);
+            border: 1px solid var(--accent-green);
+        }
+        
+        .unlock-input {
+            text-align: center;
+            font-size: 1.5rem;
+            letter-spacing: 5px;
+        }
+        
+        .btn-unlock { background-color: var(--accent-green); }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+        }
+        .settings-row input {
+            padding: 5px 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: white;
+            border-radius: 5px;
+            width: 120px;
+            font-size: 0.8rem;
+        }
+        
+        /* Map custom styles */
+        .gm-style-cc { display: none; }
+        
+        .marker-cart {
+            width: 30px; height: 30px;
+            background-color: var(--accent-blue);
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 15px var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        
+        /* Utility */
+        .pac-container {
+            background-color: var(--surface);
+            border: 1px solid #334155;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            border-radius: 0 0 10px 10px;
+            margin-top: 5px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+        .pac-item {
+            color: #e2e8f0;
+            border-top: 1px solid #334155;
+            padding: 10px;
+        }
+        .pac-item:hover {
+            background-color: #334155;
+        }
+        .pac-item-query {
+            color: white;
+            font-size: 1rem;
+        }
+        .pac-icon { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- Screen 1: Order Form -->
+    <div id="screen-order" class="screen">
+        <div class="header">
+            <h1 style="color: var(--accent-blue);">🤖 RoCAR</h1>
+            <h2 style="font-size: 1.2rem; margin-top: 4px;">Delivery</h2>
+        </div>
+        
+        <div class="form-container">
+            <div class="settings-row">
+                <span>Backend IP:</span>
+                <input type="text" id="backend-ip" value="localhost">
+            </div>
+
+            <div class="input-group">
+                <span class="input-icon" style="color: var(--accent-green);">🟢</span>
+                <input type="text" id="input-pickup" placeholder="Pickup Location (Shop)">
+            </div>
+            
+            <div class="input-group">
+                <span class="input-icon" style="color: var(--accent-red);">🔴</span>
+                <input type="text" id="input-delivery" placeholder="Delivery Location (Your Address)">
+            </div>
+            
+            <button id="btn-confirm" class="btn" disabled>CONFIRM ORDER</button>
+        </div>
+        
+        <div id="order-map-container">
+            <div id="order-map"></div>
+        </div>
+    </div>
+
+    <!-- Screen 2: Tracking -->
+    <div id="screen-track" class="screen hidden">
+        <div id="track-map-container">
+            <div id="track-map"></div>
+        </div>
+        
+        <div class="header-status">
+            <div id="status-text">🔄 Connecting...</div>
+            <div id="eta-container">
+                <span id="eta-text" class="mono">ETA: -- min</span>
+                <span id="speed-text" class="mono">Speed: -- m/s</span>
+            </div>
+        </div>
+
+        <div id="unlock-container">
+            <h3 style="text-align: center; color: var(--accent-green);">✅ Order Arrived!</h3>
+            <p style="text-align: center; font-size: 0.9rem; color: var(--text-muted);">Enter OTP to unlock your delivery</p>
+            <input type="text" id="input-otp" class="unlock-input" placeholder="1234" maxlength="4">
+            <button id="btn-unlock" class="btn btn-unlock">UNLOCK COMPARTMENT</button>
+        </div>
+    </div>
+
+    <script>
+        const MAP_STYLE = [
+            { "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
+            { "elementType": "labels.text.stroke", "stylers": [{ "color": "#242f3e" }] },
+            { "elementType": "labels.text.fill", "stylers": [{ "color": "#746855" }] },
+            { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#38414e" }] },
+            { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#212a37" }] },
+            { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#17263c" }] }
+        ];
+
+        // State
+        let orderMap, trackMap;
+        let directionsService;
+        let orderDirectionsRenderer;
+        
+        let sourcePlace = null;
+        let destPlace = null;
+        let routePoints = [];
+        
+        // Tracking State
+        let ws = null;
+        let wsReconnectTimeout = null;
+        
+        let trackMarkers = {
+            source: null,
+            dest: null,
+            cart: null
+        };
+        let trackPolylines = {
+            full: null,
+            covered: null
+        };
+        
+        let currentCartPos = null;
+        let targetCartPos = null;
+        let animationFrameId = null;
+        let lastUpdateTime = 0;
+
+        const elScreenOrder = document.getElementById('screen-order');
+        const elScreenTrack = document.getElementById('screen-track');
+        const btnConfirm = document.getElementById('btn-confirm');
+        const backendIpInput = document.getElementById('backend-ip');
+        const statusText = document.getElementById('status-text');
+        const etaText = document.getElementById('eta-text');
+        const speedText = document.getElementById('speed-text');
+        const unlockContainer = document.getElementById('unlock-container');
+        const inputOtp = document.getElementById('input-otp');
+        const btnUnlock = document.getElementById('btn-unlock');
+
+        // Init Google Maps
+        function initMaps() {
+            const defaultCenter = { lat: 12.9716, lng: 77.5946 }; // Bangalore default
+            
+            // Order Map
+            orderMap = new google.maps.Map(document.getElementById('order-map'), {
+                center: defaultCenter,
+                zoom: 12,
+                styles: MAP_STYLE,
+                disableDefaultUI: true
+            });
+            
+            // Track Map
+            trackMap = new google.maps.Map(document.getElementById('track-map'), {
+                center: defaultCenter,
+                zoom: 15,
+                styles: MAP_STYLE,
+                disableDefaultUI: true
+            });
+
+            directionsService = new google.maps.DirectionsService();
+            orderDirectionsRenderer = new google.maps.DirectionsRenderer({
+                map: orderMap,
+                suppressMarkers: false,
+                polylineOptions: { strokeColor: '#94a3b8', strokeWeight: 4 }
+            });
+
+            setupAutocomplete();
+        }
+
+        function setupAutocomplete() {
+            const inputPickup = document.getElementById('input-pickup');
+            const inputDelivery = document.getElementById('input-delivery');
+            
+            const acPickup = new google.maps.places.Autocomplete(inputPickup);
+            const acDelivery = new google.maps.places.Autocomplete(inputDelivery);
+
+            acPickup.bindTo('bounds', orderMap);
+            acDelivery.bindTo('bounds', orderMap);
+
+            acPickup.addListener('place_changed', () => {
+                const place = acPickup.getPlace();
+                if (!place.geometry) return;
+                sourcePlace = {
+                    lat: place.geometry.location.lat(),
+                    lng: place.geometry.location.lng()
+                };
+                checkRoute();
+            });
+
+            acDelivery.addListener('place_changed', () => {
+                const place = acDelivery.getPlace();
+                if (!place.geometry) return;
+                destPlace = {
+                    lat: place.geometry.location.lat(),
+                    lng: place.geometry.location.lng()
+                };
+                checkRoute();
+            });
+        }
+
+        function checkRoute() {
+            if (sourcePlace && destPlace) {
+                calculateAndDisplayRoute();
+                btnConfirm.disabled = false;
+            } else {
+                btnConfirm.disabled = true;
+            }
+        }
+
+        function calculateAndDisplayRoute() {
+            directionsService.route({
+                origin: sourcePlace,
+                destination: destPlace,
+                travelMode: google.maps.TravelMode.DRIVING
+            }, (response, status) => {
+                if (status === 'OK') {
+                    orderDirectionsRenderer.setDirections(response);
+                    
+                    // Extract route points for backend
+                    const path = response.routes[0].overview_path;
+                    routePoints = path.map(p => ({ lat: p.lat(), lng: p.lng() }));
+                } else {
+                    alert('Directions request failed due to ' + status);
+                }
+            });
+        }
+
+        // Place Order Logic
+        btnConfirm.addEventListener('click', () => {
+            if (!sourcePlace || !destPlace || routePoints.length === 0) return;
+            
+            // Switch screens
+            elScreenOrder.classList.add('hidden');
+            elScreenTrack.classList.remove('hidden');
+            
+            // Setup Tracking Map UI
+            setupTrackingMap();
+            
+            // Connect WS and send order
+            connectWebSocketAndOrder();
+        });
+
+        function setupTrackingMap() {
+            trackMap.setCenter(sourcePlace);
+            
+            // Full route polyline
+            trackPolylines.full = new google.maps.Polyline({
+                path: routePoints,
+                geodesic: true,
+                strokeColor: '#475569',
+                strokeOpacity: 0.8,
+                strokeWeight: 4,
+                map: trackMap
+            });
+            
+            // Covered route polyline
+            trackPolylines.covered = new google.maps.Polyline({
+                path: [sourcePlace],
+                geodesic: true,
+                strokeColor: '#0ea5e9',
+                strokeOpacity: 1.0,
+                strokeWeight: 5,
+                map: trackMap
+            });
+
+            // Markers
+            trackMarkers.source = new google.maps.Marker({
+                position: sourcePlace,
+                map: trackMap,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    fillColor: '#10b981',
+                    fillOpacity: 1,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 2,
+                    scale: 8
+                }
+            });
+            
+            trackMarkers.dest = new google.maps.Marker({
+                position: destPlace,
+                map: trackMap,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    fillColor: '#ef4444',
+                    fillOpacity: 1,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 2,
+                    scale: 8
+                }
+            });
+            
+            currentCartPos = { ...sourcePlace };
+            
+            // Use standard marker for Cart instead of AdvancedMarkerElement to keep it simple and avoid loading extra libs
+            trackMarkers.cart = new google.maps.Marker({
+                position: currentCartPos,
+                map: trackMap,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    fillColor: '#0ea5e9',
+                    fillOpacity: 1,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 3,
+                    scale: 12
+                },
+                zIndex: 100
+            });
+            
+            // Fit bounds
+            const bounds = new google.maps.LatLngBounds();
+            bounds.extend(sourcePlace);
+            bounds.extend(destPlace);
+            trackMap.fitBounds(bounds);
+        }
+
+        // WebSocket Logic
+        function connectWebSocketAndOrder() {
+            const ip = backendIpInput.value || 'localhost';
+            const wsUrl = `ws://${ip}:8000/ws/track`;
+            
+            statusText.innerHTML = "🔄 Connecting...";
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log("WS Connected");
+                    // Send order
+                    const orderPayload = {
+                        type: "new_order",
+                        source: sourcePlace,
+                        destination: destPlace,
+                        route_points: routePoints
+                    };
+                    ws.send(JSON.stringify(orderPayload));
+                    
+                    statusText.innerHTML = "📡 Waiting for updates...";
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'location_update') {
+                        handleLocationUpdate(data);
+                    }
+                };
+                
+                ws.onclose = () => {
+                    console.log("WS Closed");
+                    statusText.innerHTML = "❌ Disconnected. Reconnecting...";
+                    scheduleReconnect();
+                };
+                
+                ws.onerror = (err) => {
+                    console.error("WS Error", err);
+                };
+            } catch (e) {
+                console.error("WS Init Error", e);
+                scheduleReconnect();
+            }
+        }
+        
+        let reconnectDelay = 1000;
+        function scheduleReconnect() {
+            if (wsReconnectTimeout) clearTimeout(wsReconnectTimeout);
+            wsReconnectTimeout = setTimeout(() => {
+                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+                connectWebSocketAndOrder();
+            }, reconnectDelay);
+        }
+
+        // Handle Updates
+        function handleLocationUpdate(data) {
+            // Update UI Phase
+            updatePhaseUI(data.phase);
+            
+            // Update ETA & Speed
+            if (data.eta_seconds !== undefined) {
+                etaText.innerText = `ETA: ${Math.round(data.eta_seconds / 60)} min`;
+            }
+            if (data.speed !== undefined) {
+                speedText.innerText = `Speed: ${data.speed.toFixed(1)} m/s`;
+            }
+
+            // Update Map
+            if (data.cart && data.cart.lat && data.cart.lng) {
+                const newPos = { lat: data.cart.lat, lng: data.cart.lng };
+                
+                // Set target for animation
+                targetCartPos = newPos;
+                lastUpdateTime = performance.now();
+                
+                if (!animationFrameId) {
+                    animateCart();
+                }
+                
+                // Center map softly
+                trackMap.panTo(newPos);
+            }
+        }
+
+        function updatePhaseUI(phase) {
+            let text = "";
+            switch (phase) {
+                case "PICKUP": text = "🏪 Cart heading to shop..."; break;
+                case "AWAITING_PACKING": text = "📦 Waiting for shopkeeper..."; break;
+                case "DELIVERY": text = "🚚 Your order is on the way!"; break;
+                case "IDLE": text = "✅ Delivered! Unlock your order"; break;
+                default: text = `📡 ${phase}`;
+            }
+            statusText.innerHTML = text;
+            
+            if (phase === "IDLE") {
+                unlockContainer.style.display = "flex";
+            } else {
+                unlockContainer.style.display = "none";
+            }
+        }
+
+        // Smooth Animation Loop
+        function animateCart() {
+            if (!currentCartPos || !targetCartPos) {
+                animationFrameId = requestAnimationFrame(animateCart);
+                return;
+            }
+            
+            // Simple interpolation (lerp)
+            const smoothing = 0.1; 
+            
+            const dLat = targetCartPos.lat - currentCartPos.lat;
+            const dLng = targetCartPos.lng - currentCartPos.lng;
+            
+            if (Math.abs(dLat) > 0.00001 || Math.abs(dLng) > 0.00001) {
+                currentCartPos.lat += dLat * smoothing;
+                currentCartPos.lng += dLng * smoothing;
+                
+                const pos = new google.maps.LatLng(currentCartPos.lat, currentCartPos.lng);
+                trackMarkers.cart.setPosition(pos);
+                
+                // Update covered polyline
+                const path = trackPolylines.covered.getPath();
+                path.push(pos);
+                // Keep it manageable or just let it grow
+            } else {
+                // Snapped
+                currentCartPos.lat = targetCartPos.lat;
+                currentCartPos.lng = targetCartPos.lng;
+                trackMarkers.cart.setPosition(new google.maps.LatLng(currentCartPos.lat, currentCartPos.lng));
+            }
+            
+            animationFrameId = requestAnimationFrame(animateCart);
+        }
+
+        // Unlock
+        btnUnlock.addEventListener('click', () => {
+            const otp = inputOtp.value;
+            if (otp.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "unlock",
+                    otp: otp
+                }));
+                btnUnlock.innerText = "UNLOCK SENT!";
+                btnUnlock.style.backgroundColor = "#94a3b8";
+                setTimeout(() => {
+                    btnUnlock.innerText = "UNLOCK COMPARTMENT";
+                    btnUnlock.style.backgroundColor = "var(--accent-green)";
+                }, 2000);
+            }
+        });
+
+        window.onload = initMaps;
+    </script>
+</body>
+</html>

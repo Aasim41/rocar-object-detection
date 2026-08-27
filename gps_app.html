@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cart GPS Streamer</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #f8fafc;
+            --accent-color: #0ea5e9;
+            --success-color: #10b981;
+            --error-color: #ef4444;
+            --card-bg: #1e293b;
+            --border-glow: 0 0 10px rgba(14, 165, 233, 0.5);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body, html {
+            height: 100%;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1, h2, h3, .title-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        header {
+            padding: 15px;
+            background: linear-gradient(to bottom, #1e293b, #0f172a);
+            border-bottom: 1px solid var(--accent-color);
+            box-shadow: var(--border-glow);
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            color: var(--accent-color);
+            text-shadow: 0 0 5px var(--accent-color);
+            margin-bottom: 5px;
+        }
+
+        header p {
+            font-size: 0.8rem;
+            color: #94a3b8;
+        }
+
+        .controls {
+            padding: 10px 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            background-color: var(--card-bg);
+            border: 1px solid #334155;
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', monospace;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 5px rgba(14, 165, 233, 0.5);
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--accent-color);
+            color: var(--accent-color);
+            font-family: 'Orbitron', sans-serif;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button.active {
+            background-color: var(--accent-color);
+            color: var(--bg-color);
+            box-shadow: var(--border-glow);
+        }
+
+        button.danger {
+            border-color: var(--error-color);
+            color: var(--error-color);
+        }
+
+        button.danger.active {
+            background-color: var(--error-color);
+            color: var(--text-color);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 15px;
+            font-size: 0.8rem;
+            background-color: #1e293b;
+            flex-shrink: 0;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--error-color);
+            box-shadow: 0 0 5px var(--error-color);
+        }
+
+        .dot.connected {
+            background-color: var(--success-color);
+            box-shadow: 0 0 8px var(--success-color);
+            animation: pulse-green 2s infinite;
+        }
+        
+        .dot.connecting {
+            background-color: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+            animation: pulse-orange 1s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        
+        @keyframes pulse-orange {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { box-shadow: 0 0 0 5px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+            overflow-y: auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .card-label {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .card-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .card-value.small {
+            font-size: 1rem;
+        }
+
+        #map-container {
+            flex: 1;
+            min-height: 150px;
+            border-radius: 8px;
+            border: 1px solid var(--accent-color);
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+            margin: 0 10px 10px 10px;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        #error-banner {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: var(--error-color);
+            padding: 10px;
+            text-align: center;
+            font-size: 0.8rem;
+            border-bottom: 1px solid var(--error-color);
+            display: none;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>GPS TRACKER</h1>
+        <p class="title-font">CART TELEMETRY STREAM</p>
+    </header>
+    
+    <div id="error-banner"></div>
+
+    <div class="status-bar">
+        <div class="status-indicator">
+            <div id="ws-dot" class="dot"></div>
+            <span id="ws-status">DISCONNECTED</span>
+        </div>
+        <div class="status-indicator">
+            <div id="gps-dot" class="dot"></div>
+            <span id="gps-status">GPS IDLE</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="input-group">
+            <input type="text" id="backend-ip" value="localhost" placeholder="Backend IP or Hostname">
+            <button id="btn-connect">Connect</button>
+        </div>
+        <button id="btn-track" class="danger">Start Tracking</button>
+    </div>
+
+    <div class="main-content">
+        <div class="card full-width">
+            <div class="card-label">Coordinates</div>
+            <div class="card-value small" id="val-coords">0.000000, 0.000000</div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Accuracy</div>
+                <div class="card-value" id="val-accuracy">-- m</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Speed</div>
+                <div class="card-value" id="val-speed">-- km/h</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Heading</div>
+                <div class="card-value" id="val-heading">-- °</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Msgs Sent</div>
+                <div class="card-value" id="val-msgs">0</div>
+            </div>
+        </div>
+        
+        <div class="card full-width" style="padding: 5px 10px;">
+            <div class="card-label" style="margin-bottom: 0;">Last Update: <span id="val-time" style="color:var(--text-color); font-family: 'JetBrains Mono', monospace;">--</span></div>
+        </div>
+    </div>
+
+    <div id="map-container">
+        <div id="map"></div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // DOM Elements
+        const elIp = document.getElementById('backend-ip');
+        const btnConnect = document.getElementById('btn-connect');
+        const btnTrack = document.getElementById('btn-track');
+        const wsDot = document.getElementById('ws-dot');
+        const wsStatus = document.getElementById('ws-status');
+        const gpsDot = document.getElementById('gps-dot');
+        const gpsStatus = document.getElementById('gps-status');
+        const errBanner = document.getElementById('error-banner');
+        
+        const valCoords = document.getElementById('val-coords');
+        const valAccuracy = document.getElementById('val-accuracy');
+        const valSpeed = document.getElementById('val-speed');
+        const valHeading = document.getElementById('val-heading');
+        const valMsgs = document.getElementById('val-msgs');
+        const valTime = document.getElementById('val-time');
+
+        // State
+        let ws = null;
+        let isConnecting = false;
+        let shouldReconnect = false;
+        let reconnectAttempts = 0;
+        let reconnectTimeout = null;
+        let pingInterval = null;
+        
+        let watchId = null;
+        let isTracking = false;
+        let currentPos = null;
+        let sendInterval = null;
+        let msgsSent = 0;
+
+        // Map setup
+        let map = L.map('map', { zoomControl: false }).setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap',
+            maxZoom: 19
+        }).addTo(map);
+        let marker = null;
+        let circle = null;
+
+        function showError(msg) {
+            errBanner.textContent = msg;
+            errBanner.style.display = msg ? 'block' : 'none';
+        }
+
+        // --- WebSocket Logic ---
+        
+        function connectWS() {
+            if (ws || isConnecting) return;
+            
+            const ip = elIp.value.trim() || 'localhost';
+            const url = `ws://${ip}:8000/ws/gps`;
+            
+            isConnecting = true;
+            shouldReconnect = true;
+            
+            wsDot.className = 'dot connecting';
+            wsStatus.textContent = 'CONNECTING...';
+            btnConnect.textContent = 'Disconnect';
+            btnConnect.classList.add('active');
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    isConnecting = false;
+                    reconnectAttempts = 0;
+                    wsDot.className = 'dot connected';
+                    wsStatus.textContent = 'CONNECTED';
+                    showError('');
+                    
+                    // Keepalive ping every 5s if no GPS
+                    pingInterval = setInterval(() => {
+                        if (ws && ws.readyState === WebSocket.OPEN && !currentPos) {
+                            ws.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+                        }
+                    }, 5000);
+                };
+                
+                ws.onclose = () => {
+                    cleanupWS();
+                    wsDot.className = 'dot';
+                    wsStatus.textContent = 'DISCONNECTED';
+                    
+                    if (shouldReconnect) {
+                        scheduleReconnect();
+                    } else {
+                        btnConnect.textContent = 'Connect';
+                        btnConnect.classList.remove('active');
+                    }
+                };
+                
+                ws.onerror = (err) => {
+                    console.error("WS Error:", err);
+                    wsDot.className = 'dot';
+                    wsStatus.textContent = 'ERROR';
+                    // onclose will handle reconnect
+                };
+                
+            } catch (err) {
+                console.error(err);
+                showError("Invalid WebSocket URL");
+                cleanupWS();
+                isConnecting = false;
+                wsDot.className = 'dot';
+                wsStatus.textContent = 'DISCONNECTED';
+                btnConnect.textContent = 'Connect';
+                btnConnect.classList.remove('active');
+            }
+        }
+        
+        function cleanupWS() {
+            if (ws) {
+                ws.onopen = null;
+                ws.onclose = null;
+                ws.onerror = null;
+                if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                    ws.close();
+                }
+                ws = null;
+            }
+            isConnecting = false;
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+        
+        function disconnectWS() {
+            shouldReconnect = false;
+            clearTimeout(reconnectTimeout);
+            cleanupWS();
+            wsDot.className = 'dot';
+            wsStatus.textContent = 'DISCONNECTED';
+            btnConnect.textContent = 'Connect';
+            btnConnect.classList.remove('active');
+        }
+        
+        function scheduleReconnect() {
+            isConnecting = true;
+            wsDot.className = 'dot connecting';
+            wsStatus.textContent = 'RECONNECTING...';
+            
+            let delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+            reconnectAttempts++;
+            
+            reconnectTimeout = setTimeout(() => {
+                isConnecting = false;
+                connectWS();
+            }, delay);
+        }
+
+        btnConnect.addEventListener('click', () => {
+            if (ws || isConnecting || shouldReconnect) {
+                disconnectWS();
+            } else {
+                connectWS();
+            }
+        });
+
+        // --- GPS Logic ---
+        
+        function startTracking() {
+            if (!("geolocation" in navigator)) {
+                showError("Geolocation is not supported by your browser");
+                return;
+            }
+            
+            isTracking = true;
+            btnTrack.textContent = 'Stop Tracking';
+            btnTrack.classList.add('active');
+            btnTrack.classList.remove('danger');
+            gpsDot.className = 'dot connected';
+            gpsStatus.textContent = 'TRACKING';
+            showError('');
+            
+            watchId = navigator.geolocation.watchPosition(
+                (pos) => {
+                    currentPos = pos;
+                    updateUI(pos);
+                },
+                (err) => {
+                    console.error("GPS Error:", err);
+                    let msg = "GPS Error: ";
+                    switch(err.code) {
+                        case err.PERMISSION_DENIED: msg += "Permission Denied"; break;
+                        case err.POSITION_UNAVAILABLE: msg += "Position Unavailable"; break;
+                        case err.TIMEOUT: msg += "Timeout"; break;
+                        default: msg += "Unknown error";
+                    }
+                    showError(msg);
+                    gpsDot.className = 'dot';
+                    gpsStatus.textContent = 'ERROR';
+                },
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 5000
+                }
+            );
+            
+            // Send data every 1s
+            sendInterval = setInterval(sendGPSData, 1000);
+        }
+        
+        function stopTracking() {
+            isTracking = false;
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            if (sendInterval) {
+                clearInterval(sendInterval);
+                sendInterval = null;
+            }
+            currentPos = null;
+            
+            btnTrack.textContent = 'Start Tracking';
+            btnTrack.classList.remove('active');
+            btnTrack.classList.add('danger');
+            gpsDot.className = 'dot';
+            gpsStatus.textContent = 'GPS IDLE';
+        }
+        
+        function sendGPSData() {
+            if (!currentPos || !ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            const coords = currentPos.coords;
+            // Convert speed m/s to km/h
+            const speedKmh = coords.speed !== null ? coords.speed * 3.6 : 0;
+            
+            const payload = {
+                lat: coords.latitude,
+                lng: coords.longitude,
+                accuracy: coords.accuracy,
+                speed: speedKmh,
+                heading: coords.heading || 0
+            };
+            
+            ws.send(JSON.stringify(payload));
+            
+            msgsSent++;
+            valMsgs.textContent = msgsSent;
+            
+            const now = new Date();
+            valTime.textContent = now.toLocaleTimeString() + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        }
+        
+        function updateUI(pos) {
+            const coords = pos.coords;
+            const lat = coords.latitude.toFixed(6);
+            const lng = coords.longitude.toFixed(6);
+            
+            valCoords.textContent = `${lat}, ${lng}`;
+            valAccuracy.textContent = coords.accuracy ? `${coords.accuracy.toFixed(1)} m` : '-- m';
+            
+            const speedKmh = coords.speed !== null ? coords.speed * 3.6 : 0;
+            valSpeed.textContent = coords.speed !== null ? `${speedKmh.toFixed(1)} km/h` : '-- km/h';
+            
+            valHeading.textContent = coords.heading !== null ? `${coords.heading.toFixed(0)} °` : '-- °';
+            
+            // Update Map
+            const latLng = [coords.latitude, coords.longitude];
+            if (!marker) {
+                map.setView(latLng, 18);
+                marker = L.circleMarker(latLng, {
+                    radius: 8,
+                    fillColor: "#0ea5e9",
+                    color: "#fff",
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                circle = L.circle(latLng, {
+                    radius: coords.accuracy,
+                    color: "#0ea5e9",
+                    weight: 1,
+                    fillOpacity: 0.1
+                }).addTo(map);
+            } else {
+                marker.setLatLng(latLng);
+                circle.setLatLng(latLng);
+                circle.setRadius(coords.accuracy);
+                map.panTo(latLng);
+            }
+        }
+        
+        btnTrack.addEventListener('click', () => {
+            if (isTracking) stopTracking();
+            else startTracking();
+        });
+        
+        // Initial map fix
+        setTimeout(() => map.invalidateSize(), 500);
+
+    </script>
+</body>
+</html>

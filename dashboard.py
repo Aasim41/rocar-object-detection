@@ -20,365 +20,415 @@ st.set_page_config(
 # ============================================================
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap');
     
-    /* ===== CORE ===== */
-    .stApp {
-        background: #0f172a;
-        color: #f8fafc;
+    /* ===== CORE VARIABLES & ANIMATIONS ===== */
+    :root {
+        --bg-main: #0A0A0B; /* Deep neutral black */
+        --bg-panel: rgba(24, 24, 27, 0.6); /* Neutral zinc */
+        --border-color: rgba(255, 255, 255, 0.08);
+        --border-hover: rgba(255, 255, 255, 0.15);
+        --accent-blue: #ffffff; /* Clean white instead of neon blue */
+        --text-main: #ededed;
+        --text-muted: #a1a1aa;
     }
 
-    /* Kill Streamlit chrome */
+    @keyframes fadeSlideUp {
+        0% { opacity: 0; transform: translateY(15px); }
+        100% { opacity: 1; transform: translateY(0); }
+    }
+
+    .stApp {
+        background: var(--bg-main) !important;
+        /* Removed the glowing radial gradients for a cleaner, flatter look */
+        color: var(--text-main);
+        font-family: 'Inter', sans-serif;
+    }
+
     #MainMenu, footer, .stDeployButton, header { display: none !important; }
 
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 5px; }
-    ::-webkit-scrollbar-track { background: #0a0f1a; }
-    ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-    /* ===== TOP BAR ===== */
+    /* ===== ANTI-BLINK: Hide Streamlit fragment re-render flash ===== */
+    [data-stale="true"],
+    .stale,
+    .element-container.stale,
+    .stMarkdown.stale {
+        opacity: 1 !important;
+        transition: none !important;
+    }
+    
+    /* Prevent any fade-out/fade-in transitions on fragment containers */
+    .stElementContainer,
+    .element-container,
+    [data-testid="stVerticalBlock"],
+    [data-testid="column"] {
+        transition: none !important;
+        animation: none !important;
+    }
+    
+    /* Kill the spinner/loading overlay that appears during re-render */
+    .stSpinner, [data-testid="stSpinner"] {
+        display: none !important;
+    }
+
+    /* ===== TOP BAR (GLASSMORPHISM) ===== */
     .topbar {
-        background: rgba(15, 23, 42, 0.6);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        padding: 16px 32px;
+        background: rgba(10, 10, 11, 0.85);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: 1px solid var(--border-color);
+        padding: 20px 40px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin: -1rem -1rem 20px -1rem;
+        margin: -1.2rem -1.2rem 24px -1.2rem;
         position: sticky;
         top: 0;
         z-index: 999;
-        backdrop-filter: blur(10px);
-    }
-    .topbar::after {
-        content: '';
-        position: absolute;
-        bottom: -1px;
-        left: 0; right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, #38bdf8, #818cf8, #38bdf8, transparent);
-        opacity: 0.6;
+        animation: fadeSlideUp 0.5s ease-out;
     }
 
     .topbar-title {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 24px;
+        font-family: 'Inter', sans-serif;
+        font-size: 20px;
         font-weight: 800;
-        letter-spacing: 2px;
-        background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%);
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .topbar-title span {
+        background: linear-gradient(to right, #ffffff, #94a3b8);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
+
     .topbar-subtitle {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
-        color: #475569;
-        letter-spacing: 2px;
-        margin-top: 2px;
+        font-size: 11px;
+        color: var(--text-muted);
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        margin-top: 4px;
+        opacity: 0.7;
     }
 
     .topbar-right {
         display: flex;
         align-items: center;
-        gap: 16px;
+        gap: 20px;
     }
 
     .live-clock {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 14px;
-        color: #38bdf8;
-        letter-spacing: 2px;
-        padding: 4px 12px;
-        border: 1px solid rgba(56,189,248,0.2);
-        border-radius: 6px;
-        background: rgba(56,189,248,0.05);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        color: var(--text-muted);
+        background: rgba(255,255,255,0.03);
+        padding: 6px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
     }
 
-    /* ===== CONNECTION INDICATORS ===== */
-    .conn-group {
-        display: flex;
-        gap: 8px;
-    }
+    /* ===== CONNECTION PILLS ===== */
+    .conn-group { display: flex; gap: 10px; }
     .conn-pill {
         display: flex;
         align-items: center;
-        gap: 5px;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 30px;
+        font-family: 'Inter', sans-serif;
+        font-size: 11px;
         font-weight: 600;
-        letter-spacing: 1px;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
     }
     .conn-online {
-        background: rgba(34,197,94,0.1);
-        border: 1px solid rgba(34,197,94,0.3);
-        color: #4ade80;
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        color: #34d399;
     }
     .conn-offline {
-        background: rgba(239,68,68,0.1);
-        border: 1px solid rgba(239,68,68,0.3);
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.2);
         color: #f87171;
     }
+    
     .conn-dot {
         width: 6px; height: 6px;
         border-radius: 50%;
-        display: inline-block;
     }
-    .conn-dot-on { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
-    .conn-dot-off { background: #f87171; box-shadow: 0 0 6px #f87171; }
+    .conn-dot-on { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+    .conn-dot-off { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
 
-    @keyframes pulse-dot {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.4; }
+    @keyframes softPulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.6; transform: scale(0.95); }
     }
-    .conn-online .conn-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    .conn-online .conn-dot { animation: softPulse 2.5s ease-in-out infinite; }
 
-    /* ===== PANELS (BENTO GRID) ===== */
+    /* ===== PREMIUM PANELS ===== */
     .panel {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
         padding: 24px;
-        margin-bottom: 16px;
-        position: relative;
-        overflow: hidden;
+        margin-bottom: 20px;
         backdrop-filter: blur(12px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        transition: transform 0.3s ease, border-color 0.3s ease;
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: fadeSlideUp 0.6s ease-out backwards;
     }
+    
+    /* Stagger panel animations */
+    .panel:nth-child(1) { animation-delay: 0.1s; }
+    .panel:nth-child(2) { animation-delay: 0.2s; }
+    .panel:nth-child(3) { animation-delay: 0.3s; }
+
     .panel:hover {
-        border-color: rgba(14, 165, 233, 0.3);
-    }
-    .panel::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(56,189,248,0.3), transparent);
+        border-color: var(--border-hover);
+        box-shadow: 0 8px 32px rgba(14, 165, 233, 0.05);
+        transform: translateY(-2px);
     }
 
     .panel-label {
         font-family: 'Inter', sans-serif;
         font-size: 11px;
         font-weight: 700;
-        color: #94a3b8;
-        letter-spacing: 2px;
+        color: var(--text-muted);
+        letter-spacing: 1.5px;
         text-transform: uppercase;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
     }
     .panel-label::before {
         content: '';
-        width: 4px; height: 12px;
-        background: linear-gradient(180deg, #0ea5e9, #10b981);
-        border-radius: 2px;
-    }
-
-    /* ===== MODE BANNER ===== */
-    .mode-banner {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: 3px;
-        padding: 10px 16px;
-        border-radius: 8px;
-        text-align: center;
-        margin-bottom: 14px;
-    }
-    .mode-auto {
-        background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(56,189,248,0.1));
-        border: 1px solid rgba(99,102,241,0.35);
-        color: #a5b4fc;
-    }
-    .mode-manual {
-        background: linear-gradient(135deg, rgba(239,68,68,0.15), rgba(249,115,22,0.1));
-        border: 1px solid rgba(239,68,68,0.35);
-        color: #fca5a5;
-        animation: pulse-border 1.5s ease-in-out infinite;
-    }
-    @keyframes pulse-border {
-        0%, 100% { border-color: rgba(239,68,68,0.35); }
-        50% { border-color: rgba(239,68,68,0.7); }
+        width: 6px; height: 6px;
+        background: var(--accent-blue);
+        border-radius: 50%;
+        box-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
     }
 
     /* ===== STATUS READOUT ===== */
     .status-readout {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 18px;
+        font-family: 'Inter', sans-serif;
+        font-size: 20px;
         font-weight: 700;
-        color: #38bdf8;
-        margin-bottom: 4px;
+        color: #f1f5f9;
+        margin-bottom: 6px;
     }
     .status-detail {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
-        color: #64748b;
+        font-size: 12px;
+        color: var(--text-muted);
     }
 
     /* ===== METRIC TILES ===== */
     .metric-tile {
-        background: rgba(10,15,30,0.7);
-        border: 1px solid rgba(56,189,248,0.08);
-        border-radius: 8px;
-        padding: 12px;
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 16px;
         text-align: center;
+        transition: all 0.2s ease;
+    }
+    .metric-tile:hover {
+        background: rgba(255, 255, 255, 0.02);
+        border-color: rgba(255, 255, 255, 0.1);
     }
     .metric-tile-value {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 26px;
-        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 24px;
+        font-weight: 600;
+        color: #f8fafc;
     }
     .metric-tile-unit {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
-        font-weight: 400;
-        opacity: 0.5;
+        font-family: 'Inter', sans-serif;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+        margin-left: 2px;
     }
     .metric-tile-label {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        color: #475569;
-        letter-spacing: 2px;
+        font-family: 'Inter', sans-serif;
+        font-size: 10px;
+        color: var(--text-muted);
+        letter-spacing: 1px;
         text-transform: uppercase;
-        margin-top: 6px;
+        margin-top: 8px;
+        font-weight: 600;
     }
 
+    /* ===== VIDEO WRAPPER ===== */
+    .video-wrap {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        background: #000;
+        position: relative;
+        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+    }
+    .video-wrap img {
+        width: 100%;
+        display: block;
+        opacity: 0.9;
+        transition: opacity 0.3s ease;
+    }
+    .video-wrap:hover img {
+        opacity: 1;
+    }
+    .video-overlay-tl {
+        position: absolute;
+        top: 12px; left: 12px;
+        font-family: 'Inter', sans-serif;
+        font-size: 10px;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(239, 68, 68, 0.9);
+        padding: 4px 10px;
+        border-radius: 6px;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    .video-overlay-tl::before {
+        content: '';
+        display: block;
+        width: 6px; height: 6px;
+        background: #fff;
+        border-radius: 50%;
+        animation: softPulse 2s infinite;
+    }
+    .video-overlay-tr {
+        position: absolute;
+        top: 12px; right: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: rgba(255,255,255,0.8);
+        background: rgba(0,0,0,0.6);
+        backdrop-filter: blur(4px);
+        padding: 4px 10px;
+        border-radius: 6px;
+    }
+
+    /* ===== STREAMLIT NATIVE BUTTONS ===== */
+    .stButton > button {
+        background: rgba(255, 255, 255, 0.05) !important;
+        color: #f1f5f9 !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 10px !important;
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 500 !important;
+        font-size: 14px !important;
+        padding: 10px 16px !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        width: 100%;
+    }
+    .stButton > button:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .stButton > button:active {
+        transform: translateY(1px);
+        background: rgba(255, 255, 255, 0.03) !important;
+    }
+    
+    /* Highlight specific buttons if they contain specific text (hack for Streamlit) */
+    .stButton > button p:contains("START") { color: #34d399 !important; }
+    .stButton > button p:contains("STOP") { color: #f87171 !important; }
+
+    /* ===== LOG TERMINAL ===== */
+    .log-terminal {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 12px 16px;
+        max-height: 220px;
+        overflow-y: auto;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .log-line {
+        font-size: 11px;
+        color: #cbd5e1;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.03);
+        line-height: 1.6;
+        display: flex;
+        gap: 12px;
+    }
+    .log-line:last-child { border-bottom: none; }
+    .log-timestamp { 
+        color: #64748b; 
+        min-width: 65px;
+    }
+    
     /* ===== PROXIMITY BAR ===== */
     .prox-bar-container {
-        background: rgba(10,15,30,0.6);
-        border: 1px solid rgba(56,189,248,0.1);
-        border-radius: 8px;
-        padding: 12px 14px;
-        margin-bottom: 14px;
+        background: rgba(0,0,0,0.2);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 16px;
     }
     .prox-bar-track {
         width: 100%;
-        height: 10px;
-        background: rgba(30,58,95,0.3);
-        border-radius: 5px;
+        height: 6px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 3px;
         overflow: hidden;
         position: relative;
     }
     .prox-bar-fill {
         height: 100%;
-        border-radius: 5px;
-        transition: width 0.5s ease;
+        border-radius: 3px;
+        transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .prox-bar-labels {
         display: flex;
         justify-content: space-between;
-        margin-top: 4px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        color: #475569;
-    }
-
-    /* ===== VIDEO CONTAINER ===== */
-    .video-wrap {
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid rgba(56,189,248,0.15);
-        position: relative;
-        background: #020617;
-    }
-    .video-wrap img {
-        width: 100%;
-        display: block;
-    }
-    .video-overlay-tl {
-        position: absolute;
-        top: 8px; left: 10px;
-        font-family: 'JetBrains Mono', monospace;
+        margin-top: 8px;
+        font-family: 'Inter', sans-serif;
         font-size: 10px;
-        color: #ef4444;
-        background: rgba(0,0,0,0.6);
-        padding: 2px 8px;
-        border-radius: 4px;
-        letter-spacing: 1px;
-    }
-    .video-overlay-tr {
-        position: absolute;
-        top: 8px; right: 10px;
-        font-family: 'Orbitron', sans-serif;
-        font-size: 9px;
-        color: #38bdf8;
-        background: rgba(0,0,0,0.6);
-        padding: 2px 8px;
-        border-radius: 4px;
-        letter-spacing: 1px;
-    }
-
-    /* ===== BUTTONS ===== */
-    .stButton > button {
-        background: linear-gradient(135deg, #16a34a, #22c55e) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 12px !important;
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 600 !important;
-        font-size: 14px !important;
-        padding: 12px 16px !important;
-        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-        width: 100%;
-        box-shadow: 0 4px 15px rgba(22, 163, 74, 0.2) !important;
-    }
-    .stButton > button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 10px 25px rgba(22, 163, 74, 0.4) !important;
-    }
-    .stButton > button:active {
-        transform: scale(0.98);
-    }
-
-    /* ===== LOG TERMINAL ===== */
-    .log-terminal {
-        background: rgba(5,8,15,0.9);
-        border: 1px solid rgba(56,189,248,0.08);
-        border-radius: 8px;
-        padding: 10px 12px;
-        max-height: 220px;
-        overflow-y: auto;
-    }
-    .log-line {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
-        color: #64748b;
-        padding: 3px 0;
-        border-bottom: 1px solid rgba(30,58,95,0.15);
-        line-height: 1.5;
-    }
-    .log-line:last-child { border-bottom: none; }
-    .log-timestamp { color: #1e3a5f; }
-    .log-highlight { color: #38bdf8; }
-
-    /* ===== SECTION DIVIDER ===== */
-    .section-divider {
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(56,189,248,0.15), transparent);
-        margin: 20px 0;
+        font-weight: 500;
+        color: var(--text-muted);
     }
 
     /* ===== NO-CAM PLACEHOLDER ===== */
     .no-cam {
         width: 100%;
         height: 400px;
-        background: radial-gradient(circle at center, #0a1020, #050810);
-        border-radius: 8px;
+        background: rgba(0,0,0,0.2);
+        border-radius: 12px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(56,189,248,0.1);
+        border: 1px dashed rgba(255,255,255,0.15);
     }
-    .no-cam-icon { font-size: 40px; margin-bottom: 10px; opacity: 0.3; }
+    .no-cam-icon { 
+        font-size: 32px; 
+        margin-bottom: 12px; 
+        opacity: 0.5;
+        filter: grayscale(1);
+    }
     .no-cam-text {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px;
-        color: #334155;
-        letter-spacing: 2px;
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-muted);
+        letter-spacing: 0.5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -386,7 +436,8 @@ st.markdown("""
 # ============================================================
 # Configuration
 # ============================================================
-BACKEND_URL = "http://localhost:8000"
+import os
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 # ============================================================
 # Helpers
@@ -461,6 +512,8 @@ st.markdown(f"""
             {conn_pill("BACKEND", backend_online)}
             {conn_pill("ESP32", s.get("esp32_connected", False))}
             {conn_pill("CAMERA", s.get("camera_active", False))}
+            {conn_pill("GPS APP", s.get("gps_app_connected", False))}
+            {conn_pill("TRACKING", s.get("tracking_clients", 0) > 0)}
         </div>
     </div>
 </div>
@@ -477,7 +530,8 @@ with col_left:
     if backend_online and status_data.get("camera_active"):
         st.markdown(f"""
         <div class="video-wrap">
-            <img src="{BACKEND_URL}/video_feed" alt="YOLO Feed" />
+            <img id="yolo-feed" src="{BACKEND_URL}/video_feed" alt="YOLO Feed"
+                 onerror="setTimeout(function(){{ document.getElementById('yolo-feed').src='{BACKEND_URL}/video_feed?t='+Date.now(); }}, 2000);" />
             <div class="video-overlay-tl">● REC</div>
             <div class="video-overlay-tr">YOLO v8n</div>
         </div>
@@ -494,6 +548,7 @@ with col_left:
     # --- SYSTEM LOG TERMINAL ---
     @st.fragment(run_every="1s")
     def render_system_log():
+        import html
         s = fetch_status() or status_data
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.markdown('<div class="panel-label">SYSTEM LOG</div>', unsafe_allow_html=True)
@@ -504,9 +559,10 @@ with col_left:
             for log in reversed(log_history[-15:]):
                 if "]" in log:
                     ts, msg = log.split("]", 1)
+                    ts, msg = html.escape(ts), html.escape(msg)
                     log_html += f'<div class="log-line"><span class="log-timestamp">{ts}]</span>{msg}</div>'
                 else:
-                    log_html += f'<div class="log-line">{log}</div>'
+                    log_html += f'<div class="log-line">{html.escape(log)}</div>'
             st.markdown(f'<div class="log-terminal">{log_html}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="log-terminal"><div class="log-line" style="color:#334155; text-align:center;">Waiting for log data...</div></div>', unsafe_allow_html=True)
@@ -522,6 +578,7 @@ with col_left:
             for log in reversed(esp_history[-10:]):
                 if "]" in log:
                     ts, msg = log.split("]", 1)
+                    ts, msg = html.escape(ts), html.escape(msg)
                     if "SENT" in msg:
                         color = "#4ade80" # Green
                     elif "RECV" in msg:
@@ -531,7 +588,7 @@ with col_left:
                         
                     esp_html += f'<div class="log-line"><span class="log-timestamp">{ts}]</span><span style="color:{color}; font-weight:600;">{msg}</span></div>'
                 else:
-                    esp_html += f'<div class="log-line">{log}</div>'
+                    esp_html += f'<div class="log-line">{html.escape(log)}</div>'
             st.markdown(f'<div class="log-terminal" style="max-height:150px;">{esp_html}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="log-terminal" style="max-height:150px;"><div class="log-line" style="color:#334155; text-align:center;">No ESP32 telemetry...</div></div>', unsafe_allow_html=True)
@@ -542,25 +599,19 @@ with col_left:
 
 # ==================== RIGHT COLUMN ====================
 with col_right:
+    # --- STATUS & METRICS (auto-refresh) ---
     @st.fragment(run_every="1s")
-    def render_right_column():
+    def render_status_telemetry():
         s = fetch_status() or status_data
         is_manual = s["mode"] == "manual"
-    
-        # --- MODE BANNER ---
-        if is_manual:
-            st.markdown('<div class="mode-banner mode-manual">⚠ MANUAL OVERRIDE</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="mode-banner mode-auto">◉ AUTONOMOUS</div>', unsafe_allow_html=True)
     
         # --- STATUS READOUT ---
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.markdown('<div class="panel-label">CURRENT STATUS</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="status-readout">{s["status"]}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="status-detail">{s["latestLog"]}</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
     
-        # --- METRICS ROW ---
+        # --- METRICS ROW (inside the same panel) ---
         m1, m2, m3 = st.columns(3)
         with m1:
             is_blocked = "IN PATH" in s["status"] or "STOP" in s["status"] or "TOO CLOSE" in s["status"]
@@ -603,18 +654,18 @@ with col_right:
                 <div class="metric-tile-label">CARGO STATUS</div>
             </div>
             """, unsafe_allow_html=True)
-    
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
         # --- HEALTH & POWER METRICS ---
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">HEALTH & POWER</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">HEALTH, POWER & TELEMETRY</div>', unsafe_allow_html=True)
         
         battery = s.get("battery_level", 0)
         temp = s.get("robot_temperature", 0.0)
         amps = s.get("motor_current", 0.0)
+        speed = s.get("gps_speed", 0.0)
+        accuracy = s.get("gps_accuracy", 0.0)
         
-        # Battery Bar
         bat_color = "#4ade80" if battery > 20 else "#ef4444"
         st.markdown(f"""
         <div class="prox-bar-container">
@@ -625,82 +676,139 @@ with col_right:
         </div>
         """, unsafe_allow_html=True)
         
-        # Temp & Current
         t1, t2 = st.columns(2)
         with t1:
-            temp_color = "#ef4444" if temp > 45 else "#38bdf8"
+            temp_color = "#ef4444" if temp > 45 else "#a1a1aa"
             st.markdown(f"""
             <div class="metric-tile" style="padding: 8px;">
                 <div class="metric-tile-value" style="font-size:18px; color:{temp_color}">{temp}<span class="metric-tile-unit">°C</span></div>
                 <div class="metric-tile-label" style="font-size:8px;">CORE TEMP</div>
             </div>
             """, unsafe_allow_html=True)
+            speed_color = "#4ade80" if speed > 0 else "#a1a1aa"
+            st.markdown(f"""
+            <div class="metric-tile" style="padding: 8px;">
+                <div class="metric-tile-value" style="font-size:18px; color:{speed_color}">{speed:.1f}<span class="metric-tile-unit">km/h</span></div>
+                <div class="metric-tile-label" style="font-size:8px;">GPS SPEED</div>
+            </div>
+            """, unsafe_allow_html=True)
         with t2:
-            amp_color = "#ef4444" if amps > 10 else "#eab308"
+            amp_color = "#ef4444" if amps > 10 else "#a1a1aa"
             st.markdown(f"""
             <div class="metric-tile" style="padding: 8px;">
                 <div class="metric-tile-value" style="font-size:18px; color:{amp_color}">{amps}<span class="metric-tile-unit">A</span></div>
                 <div class="metric-tile-label" style="font-size:8px;">MOTOR DRAW</div>
             </div>
             """, unsafe_allow_html=True)
+            acc_color = "#4ade80" if accuracy > 0 and accuracy < 10 else "#eab308" if accuracy >= 10 else "#a1a1aa"
+            st.markdown(f"""
+            <div class="metric-tile" style="padding: 8px;">
+                <div class="metric-tile-value" style="font-size:18px; color:{acc_color}">±{accuracy:.1f}<span class="metric-tile-unit">m</span></div>
+                <div class="metric-tile-label" style="font-size:8px;">GPS ACCURACY</div>
+            </div>
+            """, unsafe_allow_html=True)
             
         st.markdown('</div>', unsafe_allow_html=True)
     
-        # --- CONTROLS SECTION ---
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">MODE CONTROL</div>', unsafe_allow_html=True)
-        if is_manual:
-            if st.button("🔄  RESUME AUTONOMOUS", use_container_width=True, key="mode_btn"):
-                toggle_mode("autonomous")
-                st.rerun()
-        else:
-            if st.button("🚨  EMERGENCY OVERRIDE", use_container_width=True, key="mode_btn"):
-                toggle_mode("manual")
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-        if is_manual:
-            st.markdown('<div class="panel">', unsafe_allow_html=True)
-            st.markdown('<div class="panel-label">DRIVE CONTROLS</div>', unsafe_allow_html=True)
-            _, c_fwd, _ = st.columns([1, 1, 1])
-            with c_fwd:
-                if st.button("▲ FWD", key="fwd"):
-                    send_control("forward")
-            c_left, c_stop, c_right = st.columns(3)
-            with c_left:
-                if st.button("◄ LFT", key="left"):
-                    send_control("left")
-            with c_stop:
-                if st.button("■ STP", key="stop"):
-                    send_control("stop")
-            with c_right:
-                if st.button("► RGT", key="right"):
-                    send_control("right")
-            _, c_rev, _ = st.columns([1, 1, 1])
-            with c_rev:
-                if st.button("▼ REV", key="rev"):
-                    send_control("reverse")
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-        # Cargo Latch — always available regardless of mode
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">CARGO LATCH</div>', unsafe_allow_html=True)
-        c_lock, c_unlock = st.columns(2)
-        with c_lock:
-            if st.button("🔒 LOCK", key="lock"):
-                try:
-                    requests.post(f"{BACKEND_URL}/backend/pack_order", timeout=3)
-                except Exception:
-                    st.error("⚠️ Lock command failed")
-        with c_unlock:
-            if st.button("🔓 UNLOCK", key="unlock"):
-                try:
-                    requests.post(f"{BACKEND_URL}/backend/unlock", json={"action": "unlock"}, timeout=3)
-                except Exception:
-                    st.error("⚠️ Unlock command failed")
-        st.markdown('</div>', unsafe_allow_html=True)
-            
-    render_right_column()
+    render_status_telemetry()
+
+    # --- MODE TOGGLE (static, no auto-refresh) ---
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">MODE CONTROL</div>', unsafe_allow_html=True)
+    if is_manual:
+        if st.button("🔄  RESUME AUTONOMOUS", use_container_width=True, key="mode_btn"):
+            toggle_mode("autonomous")
+            st.rerun()
+    else:
+        if st.button("🚨  EMERGENCY OVERRIDE", use_container_width=True, key="mode_btn"):
+            toggle_mode("manual")
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- MANUAL DRIVE PAD (pure HTML/JS — zero Streamlit lag) ---
+    if is_manual:
+        drive_pad_html = f"""
+        <html>
+        <body style="margin:0; background:transparent;">
+        <div style="
+            background: rgba(24,24,27,0.6);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 24px;
+        ">
+            <div style="font-family:'Inter', sans-serif; font-size:11px; font-weight:700; color:#a1a1aa; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:16px;">
+                ● DRIVE CONTROLS
+            </div>
+            <style>
+                .dpad {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; max-width:240px; margin:0 auto; }}
+                .dpad-btn {{
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(255,255,255,0.12);
+                    border-radius: 10px;
+                    color: #ededed;
+                    font-family: 'Inter', sans-serif;
+                    font-size: 18px;
+                    font-weight: 600;
+                    padding: 14px 0;
+                    cursor: pointer;
+                    transition: all 0.15s ease;
+                    text-align: center;
+                    user-select: none;
+                    -webkit-user-select: none;
+                }}
+                .dpad-btn:hover {{ background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }}
+                .dpad-btn:active {{ background: rgba(255,255,255,0.15); transform: scale(0.95); }}
+                .dpad-stop {{
+                    background: rgba(239,68,68,0.15) !important;
+                    border-color: rgba(239,68,68,0.3) !important;
+                    color: #f87171 !important;
+                }}
+                .dpad-stop:hover {{ background: rgba(239,68,68,0.25) !important; }}
+                .dpad-label {{ font-size:9px; font-weight:500; color:#71717a; margin-top:2px; letter-spacing:1px; }}
+            </style>
+            <div class="dpad">
+                <div></div>
+                <button class="dpad-btn" onclick="sendCmd('forward')">▲<div class="dpad-label">FWD</div></button>
+                <div></div>
+                <button class="dpad-btn" onclick="sendCmd('left')">◄<div class="dpad-label">LFT</div></button>
+                <button class="dpad-btn dpad-stop" onclick="sendCmd('stop')">■<div class="dpad-label">STOP</div></button>
+                <button class="dpad-btn" onclick="sendCmd('right')">►<div class="dpad-label">RGT</div></button>
+                <div></div>
+                <button class="dpad-btn" onclick="sendCmd('reverse')">▼<div class="dpad-label">REV</div></button>
+                <div></div>
+            </div>
+        </div>
+        <script>
+            function sendCmd(action) {{
+                fetch("{BACKEND_URL}/backend/manual_control", {{
+                    method: "POST",
+                    headers: {{"Content-Type": "application/json"}},
+                    body: JSON.stringify({{action: action}})
+                }}).catch(e => console.error("Command failed:", e));
+            }}
+        </script>
+        </body>
+        </html>
+        """
+        components.html(drive_pad_html, height=270, scrolling=False)
+
+    # --- CARGO LATCH (static, no auto-refresh) ---
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">CARGO LATCH</div>', unsafe_allow_html=True)
+    c_lock, c_unlock = st.columns(2)
+    with c_lock:
+        if st.button("🔒 LOCK", key="lock"):
+            try:
+                requests.post(f"{BACKEND_URL}/backend/pack_order", timeout=3)
+            except Exception:
+                st.error("⚠️ Lock command failed")
+    with c_unlock:
+        if st.button("🔓 UNLOCK", key="unlock"):
+            try:
+                requests.post(f"{BACKEND_URL}/backend/unlock", json={"action": "unlock"}, timeout=3)
+            except Exception:
+                st.error("⚠️ Unlock command failed")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # --- SATELLITE TRACKING MAP ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
