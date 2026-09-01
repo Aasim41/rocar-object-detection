@@ -107,6 +107,27 @@ last_gps_update = None  # datetime timestamp
 gps_speed = 0.0  # km/h from phone GPS
 gps_accuracy = 0.0  # meters
 
+# GPS EMA Smoothing — reduces ±3-5m jitter to <±1m
+gps_ema_alpha = 0.25  # 25% new reading, 75% history (aggressive smoothing)
+gps_ema_location = None  # smoothed {lat, lng}
+gps_accuracy_gate = 12.0  # ignore readings with accuracy worse than this (meters)
+gps_movement_threshold = 2.0  # meters — ignore position changes smaller than this when stopped
+
+# Smart Obstacle Behavior State
+from collections import deque as _deque
+ultrasonic_history = _deque(maxlen=20)  # last 20 center distance readings
+obstacle_stopped_since = None
+obstacle_creep_active = False
+obstacle_creep_start = None
+OBSTACLE_STOP_TIMEOUT = 8.0
+OBSTACLE_CREEP_DURATION = 1.0
+
+# Directional Distance (from scanning servo ultrasonic)
+dist_left_cm = 999    # last reading from left scan
+dist_center_cm = 999  # last reading from center scan (default)
+dist_right_cm = 999   # last reading from right scan
+scan_servo_angle = "scan_center"  # current servo position: "scan_left"/"scan_center"/"scan_right"
+
 # WebSocket Client Tracking
 dashboard_clients: set[WebSocket] = set()
 tracking_clients: set[WebSocket] = set()
@@ -124,6 +145,7 @@ if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
 
 cap = cv2.VideoCapture(CAMERA_SOURCE)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 latest_frame = None
 annotated_frame = None
 frame_lock = threading.Lock()
@@ -167,10 +189,12 @@ def send_esp32(cmd: str):
     global last_webots_cmd, last_webots_steer
     last_webots_cmd = cmd
     
-    # If the AI commands left/right manually (e.g. YOLO dodging), override the continuous steer
-    if cmd == "left": last_webots_steer = -0.3
-    elif cmd == "right": last_webots_steer = 0.3
-    elif cmd == "forward" and not "lane_steer" in globals(): last_webots_steer = 0.0
+    # If the AI commands left/right manually (e.g. YOLO dodging), override continuous steer.
+    # Forward steer is set by yolo_loop from lane_follower — do not zero it here.
+    if cmd == "left":
+        last_webots_steer = -0.3
+    elif cmd == "right":
+        last_webots_steer = 0.3
     
     if not ws_connected or ws is None:
         return
@@ -193,8 +217,9 @@ def send_esp32(cmd: str):
     threading.Thread(target=async_send, daemon=True).start()
 
 def esp32_listener():
-    """Background thread to listen for ESP32 messages (e.g. BLOCKED)."""
+    """Background thread to listen for ESP32 messages."""
     global obstacle_detected, current_distance_cm, current_status, battery_level, motor_current, robot_temperature
+    global dist_left_cm, dist_center_cm, dist_right_cm
     while True:
         if ws_connected and ws is not None:
             try:
@@ -209,11 +234,24 @@ def esp32_listener():
                         if len(esp_commands) > 30: esp_commands.pop(0)
                     elif msg.startswith("DIST:"):
                         try:
-                            current_distance_cm = int(msg.split(":")[1])
+                            parts = msg.split(":")
+                            dist_val = int(parts[1])
+                            dir_tag = parts[2] if len(parts) > 2 else "C"
+                            
+                            # Store in directional slots
+                            if dir_tag == "L":
+                                dist_left_cm = dist_val
+                            elif dir_tag == "R":
+                                dist_right_cm = dist_val
+                            else:
+                                dist_center_cm = dist_val
+                                current_distance_cm = dist_val
+                                ultrasonic_history.append((time.time(), dist_val))
+                            
                             ts = datetime.now().strftime("%H:%M:%S")
                             esp_commands.append(f"[{ts}] RECV: {msg}")
                             if len(esp_commands) > 30: esp_commands.pop(0)
-                        except ValueError:
+                        except (ValueError, IndexError):
                             pass
                     elif msg.startswith("BAT:"):
                         try:
@@ -254,17 +292,48 @@ def add_log(message: str):
 # ============================================================
 def camera_loop():
     global latest_frame
+
+    use_url = isinstance(CAMERA_SOURCE, str)
+
     while True:
         if webots_mode:
             time.sleep(0.05)
             continue
-            
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret:
-                with frame_lock:
-                    latest_frame = frame.copy()
-        time.sleep(0.03)  # ~30 FPS
+
+        if use_url:
+            # ── Phone IP camera (OpenCV MJPEG with frame-skipping) ──
+            stream_cap = cv2.VideoCapture(CAMERA_SOURCE)
+            stream_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if not stream_cap.isOpened():
+                add_log("📷 Cannot open phone stream, retrying...")
+                time.sleep(2.0)
+                continue
+
+            while True:
+                # Grab 3 frames, only decode the last → always get the freshest
+                for _ in range(3):
+                    grabbed = stream_cap.grab()
+                if not grabbed:
+                    add_log("📷 Phone stream dropped, reconnecting...")
+                    break
+                ret, frame = stream_cap.retrieve()
+                if ret and frame is not None:
+                    frame = cv2.resize(frame, (640, 480))
+                    with frame_lock:
+                        latest_frame = frame.copy()
+                time.sleep(0.01)
+
+            stream_cap.release()
+            time.sleep(1.0)
+        else:
+            # ── Local USB / laptop webcam ──
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    frame = cv2.resize(frame, (640, 480))
+                    with frame_lock:
+                        latest_frame = frame.copy()
+            time.sleep(0.03)  # ~30 FPS
 
 # ============================================================
 # Background: Autonomous YOLO Loop
@@ -272,6 +341,7 @@ def camera_loop():
 def yolo_loop():
     """Single YOLO loop: runs inference once and caches the annotated frame."""
     global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
+    global obstacle_stopped_since, obstacle_creep_active, obstacle_creep_start, scan_servo_angle
     add_log("🤖 YOLO loop started")
     
     while True:
@@ -310,7 +380,10 @@ def yolo_loop():
                 frame_area = height * width
                 boxes = results[0].boxes
                 
-                if len(boxes) > 0:
+                valid_classes = {"person", "car", "motorcycle", "bus", "truck", "bicycle", "dog", "cow", "cat", "horse"}
+                valid_boxes = [b for b in boxes if model.names[int(b.cls[0])] in valid_classes] if len(boxes) > 0 else []
+                
+                if len(valid_boxes) > 0:
                     # ─── SMART OBSTACLE AVOIDANCE ───
                     # 1) Build an occupancy map across the frame width
                     #    For each pixel column, mark if ANY bounding box covers it
@@ -318,13 +391,9 @@ def yolo_loop():
                     total_obstacle_area = 0
                     closest_name = ""
                     
-                    valid_classes = {"person", "car", "motorcycle", "bus", "truck", "bicycle", "dog", "cow", "cat", "horse"}
-                    
-                    for box_data in boxes:
+                    for box_data in valid_boxes:
                         cid = int(box_data.cls[0])
                         class_name = model.names[cid]
-                        if class_name not in valid_classes:
-                            continue
                             
                         b = box_data.xyxy[0].cpu().numpy()
                         bx_left = max(0, int(b[0]))
@@ -375,76 +444,153 @@ def yolo_loop():
                     gap_ratio = best_gap_len / width  # How wide is the gap (0-1)
                     frame_center = width / 2.0
                     
-                    # 4) Decision logic
+                    # 4) AVOIDANCE-FIRST DECISION LOGIC
+                    
+                    # Determine if obstacle is moving away (follow-at-distance)
+                    is_moving_away = False
+                    if len(ultrasonic_history) >= 5:
+                        recent_dists = [d for _, d in list(ultrasonic_history)[-5:]]
+                        if recent_dists[-1] - recent_dists[0] > 10:
+                            is_moving_away = True
+                    
+                    # ── Evaluate Gap (Go-Around) ──
+                    steer_dir = "left" if gap_center < frame_center else "right"
+                    steer_label = "LEFT" if gap_center < frame_center else "RIGHT"
+                    
+                    # ── Directional Scanning ──
+                    # Point the ultrasonic servo towards the gap to measure true clearance
+                    target_scan_angle = "scan_left" if steer_dir == "left" else "scan_right"
+                    if scan_servo_angle != target_scan_angle:
+                        send_esp32(target_scan_angle)
+                        scan_servo_angle = target_scan_angle
+                    
+                    # Use the ultrasonic reading that matches where we are looking
+                    if scan_servo_angle == "scan_left":
+                        active_dist_cm = dist_left_cm
+                    elif scan_servo_angle == "scan_right":
+                        active_dist_cm = dist_right_cm
+                    else:
+                        active_dist_cm = dist_center_cm
+                        
+                    has_ultrasonic = active_dist_cm < 400
+                    dist_cm = active_dist_cm if has_ultrasonic else 999
+                    
+                    # Check if the gap actually has ROAD under it (avoid steering into walls)
+                    gap_has_road = False
+                    if lane_follower.last_road_mask is not None:
+                        # Check the bottom 40 rows of the gap in the road mask
+                        rmask = lane_follower.last_road_mask
+                        gap_start = int(best_gap_start)
+                        gap_end = int(best_gap_start + best_gap_len)
+                        
+                        road_pixels_slice = rmask[-40:, gap_start:gap_end]
+                        road_pixels = np.sum(road_pixels_slice > 0)
+                        gap_area = road_pixels_slice.size
+                        
+                        if gap_area > 0 and (road_pixels / gap_area) > 0.30:  # 30% road coverage
+                            gap_has_road = True
+                    else:
+                        gap_has_road = True  # Fallback if mask is missing
+                    
+                    can_go_around = gap_ratio > 0.20 and total_area_ratio < 0.40 and gap_has_road
+                    
+                    # ─── DECISION TREE ───
+                    
                     if is_fast_approaching and total_area_ratio > 0.05:
-                        # FAST APPROACHING — react immediately regardless of size
-                        send_esp32("slow")
-                        if gap_ratio > 0.15:
-                            # There's a gap — steer through it NOW
-                            if gap_center < frame_center:
-                                current_status = f"⚡ FAST {closest_name} — DODGE LEFT"
-                                add_log(f"YOLO: {closest_name} FAST → dodge LEFT")
-                                send_esp32("left")
-                            else:
-                                current_status = f"⚡ FAST {closest_name} — DODGE RIGHT"
-                                add_log(f"YOLO: {closest_name} FAST → dodge RIGHT")
-                                send_esp32("right")
+                        # ── EMERGENCY: Fast Approach ──
+                        current_status = f"🛑 FAST {closest_name} — EMERGENCY STOP"
+                        send_esp32("beep")
+                        send_esp32("stop")
+                        obstacle_detected = True
+                        if obstacle_stopped_since is None:
+                            obstacle_stopped_since = time.time()
+                            
+                    elif dist_cm < 20:
+                        # PHYSICAL COLLISION IMMINENT — hard stop no matter what
+                        current_status = f"🛑 {closest_name} COLLISION ({dist_cm}cm) — STOP"
+                        send_esp32("stop")
+                        obstacle_detected = True
+                        if obstacle_stopped_since is None:
+                            obstacle_stopped_since = time.time()
+                            
+                    elif can_go_around:
+                        # ── PRIMARY: Steer around the obstacle ──
+                        # This is the PREFERRED behavior at ANY distance
+                        obstacle_stopped_since = None
+                        obstacle_creep_active = False
+                        
+                        if dist_cm < 80:
+                            # Close — slow + hard steer
+                            send_esp32("slow")
+                            current_status = f"↪️ Dodging {closest_name} {steer_label} ({dist_cm}cm)"
+                        elif dist_cm < 200:
+                            # Medium range — slow + gentle steer
+                            send_esp32("slow")
+                            current_status = f"↪️ Avoiding {closest_name} {steer_label} ({dist_cm}cm)"
                         else:
-                            # No gap — emergency stop
-                            current_status = f"🛑 FAST {closest_name} — EMERGENCY STOP"
-                            add_log(f"YOLO: {closest_name} FAST, no gap → STOP")
-                            send_esp32("stop")
+                            # Far — normal speed + steer
+                            current_status = f"↪️ Passing {closest_name} {steer_label}"
+                        
+                        add_log(f"Avoiding {closest_name} → {steer_label} (gap {gap_ratio:.0%})")
+                        send_esp32(steer_dir)
                         obstacle_detected = True
                     
-                    elif total_area_ratio > 0.50:
-                        # TOO CLOSE — EMERGENCY STOP
-                        current_status = f"🛑 {closest_name} TOO CLOSE — STOP"
-                        add_log(f"YOLO: {closest_name} COLLISION RISK → STOP")
-                        send_esp32("stop")
+                    elif is_moving_away and dist_cm > 50:
+                        # ── SECONDARY: Follow at distance ──
+                        # Obstacle is ahead but walking away — trail behind it
+                        obstacle_stopped_since = None
+                        obstacle_creep_active = False
+                        current_status = f"🚶 Following {closest_name} ({dist_cm}cm, moving away)"
+                        send_esp32("slow")
                         obstacle_detected = True
                     
-                    elif gap_ratio < 0.10:
-                        # Road is FULLY BLOCKED (no gap wide enough) — stop
-                        current_status = f"🛑 Road blocked — STOP"
-                        add_log(f"YOLO: Multiple obstacles, no gap → STOP")
-                        send_esp32("stop")
-                        obstacle_detected = True
-                    
-                    elif total_area_ratio < 0.03:
-                        # Objects are FAR — full speed
-                        current_status = f"⬆️ {closest_name} far — FORWARD"
+                    elif dist_cm > 250 and total_area_ratio < 0.08:
+                        # Object is far and small — keep going
+                        current_status = f"⬆️ {closest_name} far ({dist_cm}cm) — FORWARD"
                         send_esp32("forward")
                         obstacle_detected = False
-                    
-                    elif total_area_ratio < 0.15:
-                        # APPROACHING — slow + steer through gap
-                        send_esp32("slow")
-                        if gap_center < frame_center:
-                            current_status = f"🐢 Avoiding — SLOW + LEFT (gap {gap_ratio:.0%})"
-                            add_log(f"YOLO: {closest_name} → slow + LEFT through gap")
-                            send_esp32("left")
-                        else:
-                            current_status = f"🐢 Avoiding — SLOW + RIGHT (gap {gap_ratio:.0%})"
-                            add_log(f"YOLO: {closest_name} → slow + RIGHT through gap")
-                            send_esp32("right")
-                        obstacle_detected = True
+                        obstacle_stopped_since = None
+                        obstacle_creep_active = False
                     
                     else:
-                        # CLOSE — slow + hard steer through gap
-                        send_esp32("slow")
-                        if gap_center < frame_center:
-                            current_status = f"⬅️ CLOSE — SLOW + HARD LEFT (gap {gap_ratio:.0%})"
-                            add_log(f"YOLO: {closest_name} close → slow + hard LEFT")
-                            send_esp32("left")
-                        else:
-                            current_status = f"➡️ CLOSE — SLOW + HARD RIGHT (gap {gap_ratio:.0%})"
-                            add_log(f"YOLO: {closest_name} close → slow + hard RIGHT")
-                            send_esp32("right")
+                        # ── LAST RESORT: No gap, can't go around ──
+                        # Stop, then creep after timeout
                         obstacle_detected = True
+                        
+                        if obstacle_stopped_since is None:
+                            obstacle_stopped_since = time.time()
+                        
+                        stop_duration = time.time() - obstacle_stopped_since
+                        
+                        if obstacle_creep_active:
+                            # Currently in creep phase
+                            if time.time() - obstacle_creep_start > OBSTACLE_CREEP_DURATION:
+                                # Creep phase ended, back to waiting
+                                obstacle_creep_active = False
+                                obstacle_stopped_since = time.time()
+                                current_status = f"🛑 Re-checking {closest_name}..."
+                                send_esp32("stop")
+                            else:
+                                current_status = f"🐢 Creeping past {closest_name}..."
+                                send_esp32("slow")
+                        elif stop_duration > OBSTACLE_STOP_TIMEOUT:
+                            # Waited long enough, try creeping
+                            obstacle_creep_active = True
+                            obstacle_creep_start = time.time()
+                            current_status = f"🐢 Creeping past {closest_name}..."
+                            add_log(f"Creeping after {OBSTACLE_STOP_TIMEOUT:.0f}s wait")
+                            send_esp32("slow")
+                        else:
+                            remaining = int(OBSTACLE_STOP_TIMEOUT - stop_duration)
+                            current_status = f"🛑 Blocked by {closest_name} ({dist_cm}cm) — creep in {remaining}s"
+                            send_esp32("stop")
                 
                 else:
                     # ─── PATH CLEAR — FOLLOW LANE OR GPS ───
-                    # 1. Start with the Lane Follower (follow the lane curve)
+                    obstacle_stopped_since = None
+                    obstacle_creep_active = False
+                    
+                    # 1. Start with the Lane Follower
                     nav_cmd = lane_cmd
                     nav_msg = lane_msg
                     
@@ -484,7 +630,6 @@ def yolo_loop():
                                 gps_cmd = nav_result.get("command", "F")
                                 waypoint_index = nav_result.get("waypoint_index", waypoint_index)
                                 
-                                # Log waypoint progress
                                 wp_total = len(current_route)
                                 if waypoint_index < wp_total:
                                     wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
@@ -493,10 +638,11 @@ def yolo_loop():
                                 cmd_map = {"F": "forward", "L": "left", "SL": "forward", "R": "right", "SR": "forward"}
                                 gps_cmd = cmd_map.get(gps_cmd, "forward")
                                 
-                                # If GPS requires a hard turn (L/R), it overrides the Edge Tracker
-                                if gps_cmd != "forward":
+                                # At intersections, GPS ALWAYS overrides lane following
+                                if lane_follower.is_intersection or gps_cmd != "forward":
                                     nav_cmd = gps_cmd
-                                    nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total})"
+                                    junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
+                                    nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
@@ -504,7 +650,22 @@ def yolo_loop():
                         add_log(f"✅ {nav_msg}")
                     current_status = f"✅ PATH CLEAR → {nav_cmd.upper()}"
                     current_distance_cm = 999
+                    
+                    # ── Scan Servo Reset ──
+                    target_scan_angle = "scan_center"
+                    if nav_cmd == "left": target_scan_angle = "scan_left"
+                    elif nav_cmd == "right": target_scan_angle = "scan_right"
+                    
+                    if scan_servo_angle != target_scan_angle:
+                        send_esp32(target_scan_angle)
+                        scan_servo_angle = target_scan_angle
+                    # ── Speed modulation: slow down on curves ──
+                    if nav_cmd in ("left", "right") and abs(lane_steer) > 0.15:
+                        send_esp32("slow")   # reduce speed first
                     send_esp32(nav_cmd)
+                    # Keep continuous steer for Webots; send_esp32 may override for dodges/GPS turns
+                    if nav_cmd == "forward":
+                        last_webots_steer = lane_steer
                     obstacle_detected = False
             
             time.sleep(0.03)
@@ -562,7 +723,6 @@ async def video_feed():
     return StreamingResponse(generate(), media_type='multipart/x-mixed-replace; boundary=frame')
 
 from fastapi.responses import HTMLResponse
-import os
 
 @app.get("/gps")
 def get_gps_app():
@@ -640,7 +800,7 @@ async def manual_control(req: ControlRequest):
 @app.post("/backend/coordinates/destinations")
 async def get_coordinates(req: Request):
     """Calculate GPS routes (called once when a new delivery order comes in)."""
-    global source_location, destination_location, current_route, current_heading, stored_deliver_points, active_phase
+    global source_location, destination_location, current_route, current_heading, stored_deliver_points, active_phase, waypoint_index
     
     body = await req.body()
     try:
@@ -822,6 +982,7 @@ async def broadcast_to_tracking():
 async def ws_gps(websocket: WebSocket):
     """GPS phone app connects here to stream live coordinates."""
     global live_location, current_heading, last_gps_update, gps_speed, gps_accuracy, gps_app_connected
+    global gps_ema_location
     
     await websocket.accept()
     gps_app_connected = True
@@ -835,10 +996,55 @@ async def ws_gps(websocket: WebSocket):
             except json.JSONDecodeError:
                 continue
             
-            new_location = {"lat": data.get("lat", 0), "lng": data.get("lng", 0)}
+            raw_lat = data.get("lat", 0)
+            raw_lng = data.get("lng", 0)
+            accuracy = data.get("accuracy", 0) or 0
+            speed = data.get("speed", 0) or 0
             
-            # Update heading from movement
-            if live_location is not None:
+            gps_speed = speed
+            gps_accuracy = accuracy
+            
+            # ── Accuracy gate: reject bad GPS readings ──
+            if accuracy > gps_accuracy_gate and gps_ema_location is not None:
+                # Bad signal — keep the last good reading
+                last_gps_update = datetime.now()
+                await websocket.send_text(json.dumps({
+                    "status": "filtered", "reason": f"accuracy {accuracy:.0f}m > {gps_accuracy_gate}m",
+                    "phase": active_phase, "mode": current_mode
+                }))
+                continue
+            
+            # ── Movement threshold: reject GPS jitter when stationary ──
+            if gps_ema_location is not None and speed < 1.0:
+                from navigation.fnpp import calculate_distance
+                jitter_dist = calculate_distance(
+                    (gps_ema_location["lat"], gps_ema_location["lng"]),
+                    (raw_lat, raw_lng)
+                )
+                if jitter_dist < gps_movement_threshold:
+                    # Cart isn't moving, this is just GPS noise — keep old position
+                    last_gps_update = datetime.now()
+                    continue
+            
+            # ── Adaptive EMA smoothing ──
+            # At low speed: heavy smoothing (alpha=0.15) to kill jitter
+            # At high speed: light smoothing (alpha=0.50) so position doesn't lag behind turns
+            adaptive_alpha = min(0.50, max(0.15, speed / 10.0))
+            
+            if gps_ema_location is None:
+                gps_ema_location = {"lat": raw_lat, "lng": raw_lng}
+            else:
+                gps_ema_location = {
+                    "lat": adaptive_alpha * raw_lat + (1.0 - adaptive_alpha) * gps_ema_location["lat"],
+                    "lng": adaptive_alpha * raw_lng + (1.0 - adaptive_alpha) * gps_ema_location["lng"],
+                }
+            
+            new_location = gps_ema_location.copy()
+            
+            # ── Heading: prefer phone compass when moving ──
+            if "heading" in data and data["heading"] is not None and speed > 1.0:
+                current_heading = data["heading"]
+            elif live_location is not None:
                 try:
                     new_bearing = calculate_bearing(live_location, new_location)
                     if live_location != new_location:
@@ -846,23 +1052,15 @@ async def ws_gps(websocket: WebSocket):
                 except Exception:
                     pass
             
-            # Use heading from phone's compass if available
-            if "heading" in data and data["heading"] is not None:
-                current_heading = data["heading"]
-            
             live_location = new_location
-            gps_speed = data.get("speed", 0) or 0
-            gps_accuracy = data.get("accuracy", 0) or 0
             last_gps_update = datetime.now()
             
-            # Acknowledge back to phone
             await websocket.send_text(json.dumps({
                 "status": "ok",
                 "phase": active_phase,
                 "mode": current_mode
             }))
             
-            # Broadcast to dashboard and tracking clients
             await broadcast_to_dashboard()
             await broadcast_to_tracking()
             
@@ -905,7 +1103,7 @@ async def ws_dashboard(websocket: WebSocket):
 @app.websocket("/ws/track")
 async def ws_track(websocket: WebSocket):
     """Delivery app connects here — receives cart location, can send orders."""
-    global source_location, destination_location, current_route, stored_deliver_points, active_phase, current_heading, cargo_state, current_status
+    global source_location, destination_location, current_route, stored_deliver_points, active_phase, current_heading, cargo_state, current_status, waypoint_index
     
     await websocket.accept()
     tracking_clients.add(websocket)
@@ -939,6 +1137,7 @@ async def ws_track(websocket: WebSocket):
                 # Convert route_points to the format the navigation system expects
                 current_route = [{"latitude": p["lat"], "longitude": p["lng"]} for p in route_points]
                 stored_deliver_points = current_route.copy()
+                waypoint_index = 0
                 active_phase = "PICKUP"
                 current_status = "📍 NEW ORDER → Navigating to shop"
                 

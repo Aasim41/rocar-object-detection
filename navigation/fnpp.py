@@ -55,8 +55,8 @@ def polypoint(current_coords, points):
 # Instead of always finding the closest point (which can go backward),
 # this advances through the route waypoints sequentially.
 
-WAYPOINT_REACHED_RADIUS = 8.0   # meters — when we're this close, advance to the next waypoint
-WAYPOINT_LOOKAHEAD = 2          # skip ahead this many points for smoother curves
+WAYPOINT_REACHED_RADIUS = 10.0  # meters — wider to handle GPS ±3-5m jitter
+WAYPOINT_LOOKAHEAD = 3           # skip ahead for smoother curves
 
 def get_next_waypoint(current_coords, points, current_index):
     """

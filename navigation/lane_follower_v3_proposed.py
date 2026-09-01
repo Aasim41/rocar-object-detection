@@ -89,10 +89,6 @@ class LaneFollower:
         self.no_road_frames = 0
         self.max_lost = 15
 
-        # ── Exposed state for external use ────────────────────────
-        self.last_road_mask = None  # last computed road mask (for go-around checks)
-        self.last_roi_y = 0        # top of the ROI in the full frame
-
     # ─────────────────────────────────────────────────────────────
     #  PUBLIC API
     # ─────────────────────────────────────────────────────────────
@@ -130,10 +126,6 @@ class LaneFollower:
 
         # 5 ── Temporal blending ───────────────────────────────────
         road_mask = self._blend_temporal(road_mask)
-
-        # Store for external use (go-around road checking)
-        self.last_road_mask = road_mask
-        self.last_roi_y = roi_y
 
         # 6 ── Scan boundaries ─────────────────────────────────────
         left_xs, right_xs, scan_abs_ys = self._scan_boundaries(

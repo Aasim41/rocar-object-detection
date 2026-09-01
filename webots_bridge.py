@@ -68,14 +68,17 @@ while driver.step() != -1:
         response = urllib.request.urlopen(f"{BACKEND_URL}/webots/command", timeout=0.5)
         data = json.loads(response.read().decode())
         cmd = data.get("command", "stop")
+        steer_angle = float(data.get("steer_angle", 0.0))
+        # Map normalized lane steer (~±0.5) to Webots radians
+        continuous_steer = max(-STEERING_ANGLE, min(STEERING_ANGLE, steer_angle * STEERING_ANGLE * 2))
         
         # 4. Map string commands to Webots Ackermann Steering
         if cmd == "forward":
             driver.setCruisingSpeed(CRUISING_SPEED)
-            driver.setSteeringAngle(0.0)
+            driver.setSteeringAngle(continuous_steer)
         elif cmd == "slow":
             driver.setCruisingSpeed(CRUISING_SPEED * 0.4)  # 40% speed when slowing
-            driver.setSteeringAngle(0.0)
+            driver.setSteeringAngle(continuous_steer)
         elif cmd == "left":
             driver.setCruisingSpeed(CRUISING_SPEED * 0.7)  # Slow down slightly for turns
             driver.setSteeringAngle(-STEERING_ANGLE)
