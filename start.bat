@@ -4,7 +4,7 @@ echo   Autonomous Cart - System Launcher
 echo ============================================
 echo.
 echo Starting FastAPI Backend on port 8000...
-start "FastAPI Backend" cmd /k "cd /d %~dp0 && uvicorn api:app --host 0.0.0.0 --port 8000 --reload"
+start "FastAPI Backend" cmd /k "cd /d %~dp0 && set CAMERA_SOURCE=http://192.168.1.5:8080/video&& uvicorn api:app --host 0.0.0.0 --port 8000 --reload"
 echo.
 echo Waiting 3 seconds for backend to initialize...
 timeout /t 3 /nobreak >nul

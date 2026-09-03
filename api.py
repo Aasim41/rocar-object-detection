@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from collections import deque
 import cv2
 import numpy as np
 import threading
@@ -26,7 +27,6 @@ from navigation.pipeline import fetch_routes
 from navigation.navigate import navigate, calculate_bearing
 from navigation.fnpp import to_tuple, calculate_distance
 from navigation.lane_follower import LaneFollower
-import random
 
 lane_follower = LaneFollower()
 
@@ -39,10 +39,39 @@ esp32_reconnect_lock = threading.Lock()
 # ============================================================
 # App Setup
 # ============================================================
-app = FastAPI(title="Autonomous Cart Backend", version="2.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    add_log("🚀 Backend starting up...")
+    
+    # Try connecting to ESP32
+    threading.Thread(target=connect_esp32, daemon=True).start()
+    
+    # Start camera capture thread
+    threading.Thread(target=camera_loop, daemon=True).start()
+    add_log("📷 Camera thread started")
+    
+    # Start unified YOLO loop (inference + navigation)
+    threading.Thread(target=yolo_loop, daemon=True).start()
+    add_log("🧠 YOLO loop started")
+    
+    # Start ESP32 listener thread
+    threading.Thread(target=esp32_listener, daemon=True).start()
+    add_log("👂 ESP32 listener thread started")
+    
+    # Start dashboard broadcast loop (async)
+    asyncio.create_task(dashboard_broadcast_loop())
+    add_log("📡 WebSocket broadcast loop started")
+    
+    add_log("✅ All systems initialized!")
+    
+    yield
+
+app = FastAPI(title="Autonomous Cart Backend", version="2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:8501", "http://127.0.0.1:5173", "http://127.0.0.1:8501"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,6 +100,54 @@ class ModeRequest(BaseModel):
 class ControlRequest(BaseModel):
     action: str
 
+class OrderRequest(BaseModel):
+    amount_inr: float
+
+class VerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+# ============================================================
+# Razorpay Setup
+# ============================================================
+import razorpay
+try:
+    rzp_client = razorpay.Client(auth=("rzp_test_TXX8gDzQSotwG0", "utHgCGw506pd4SRWMtk4eYLG"))
+except Exception as e:
+    print(f"⚠️ Failed to initialize Razorpay: {e}")
+    rzp_client = None
+
+@app.post("/api/create_order")
+def create_order(req: OrderRequest):
+    if not rzp_client:
+        return JSONResponse(status_code=500, content={"error": "Razorpay client not configured"})
+    amount_paise = int(req.amount_inr * 100)
+    data = {
+        "amount": amount_paise,
+        "currency": "INR",
+        "payment_capture": "1"
+    }
+    try:
+        order = rzp_client.order.create(data=data)
+        return {"order_id": order["id"], "amount": amount_paise}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.post("/api/verify_payment")
+def verify_payment(req: VerifyRequest):
+    if not rzp_client:
+        return JSONResponse(status_code=500, content={"error": "Razorpay client not configured"})
+    try:
+        rzp_client.utility.verify_payment_signature({
+            'razorpay_order_id': req.razorpay_order_id,
+            'razorpay_payment_id': req.razorpay_payment_id,
+            'razorpay_signature': req.razorpay_signature
+        })
+        return {"status": "success", "message": "Payment verified successfully"}
+    except razorpay.errors.SignatureVerificationError:
+        return JSONResponse(status_code=400, content={"error": "Invalid payment signature!"})
+
 # ============================================================
 # Global State
 # ============================================================
@@ -86,8 +163,8 @@ latest_log = "System starting up..."
 obstacle_detected = False
 prev_area_ratio = 0.0  # Tracks object size growth between frames (fast approach detection)
 current_distance_cm = 999
-log_history = []
-esp_commands = []
+log_history = deque(maxlen=100)
+esp_commands = deque(maxlen=30)
 
 # Webots Simulation State
 webots_mode = False
@@ -139,7 +216,7 @@ model = YOLO("yolov8n.pt")
 import os
 
 # Camera
-CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "0")
+CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "0").strip()
 # If it's a digit, treat it as an integer (USB webcam index)
 if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
@@ -151,11 +228,38 @@ annotated_frame = None
 frame_lock = threading.Lock()
 annotated_lock = threading.Lock()
 
+import queue
+
 # ============================================================
 # ESP32 WebSocket Connection
 # ============================================================
 ws = None
 ws_connected = False
+esp32_cmd_queue = queue.Queue(maxsize=50)
+
+def esp32_sender_worker():
+    """Background thread that consumes the command queue and sends to ESP32."""
+    global ws, ws_connected
+    while True:
+        cmd = esp32_cmd_queue.get()
+        if cmd is None:
+            break
+        if ws_connected and ws is not None:
+            try:
+                ws.send(cmd)
+            except Exception as e:
+                if ws_connected:
+                    ws_connected = False
+                    add_log(f"⚠️ ESP32 send failed: {e}. Attempting reconnect...")
+                    if esp32_reconnect_lock.acquire(blocking=False):
+                        try:
+                            connect_esp32()
+                        finally:
+                            esp32_reconnect_lock.release()
+        esp32_cmd_queue.task_done()
+
+# Start the sender worker
+threading.Thread(target=esp32_sender_worker, daemon=True).start()
 
 def connect_esp32():
     """Connect to ESP32 WebSocket server."""
@@ -175,46 +279,32 @@ def connect_esp32():
         print(f"⚠️ ESP32 connection failed: {e}")
 
 def send_esp32(cmd: str):
-    """Send a command to ESP32 via WebSocket without blocking the AI loop."""
-    global ws, ws_connected
+    """Queue a command to ESP32 via WebSocket without blocking the AI loop."""
+    global ws_connected
     
     # Always log the command intent for the dashboard UI (avoid spam)
     cmd_str = f"SENT: {cmd.upper()}"
     if not esp_commands or cmd_str not in esp_commands[-1]:
         ts = datetime.now().strftime("%H:%M:%S")
         esp_commands.append(f"[{ts}] {cmd_str}")
-        if len(esp_commands) > 30: esp_commands.pop(0)
     
     # Store for Webots bridge polling
     global last_webots_cmd, last_webots_steer
     last_webots_cmd = cmd
     
     # If the AI commands left/right manually (e.g. YOLO dodging), override continuous steer.
-    # Forward steer is set by yolo_loop from lane_follower — do not zero it here.
     if cmd == "left":
         last_webots_steer = -0.3
     elif cmd == "right":
         last_webots_steer = 0.3
     
-    if not ws_connected or ws is None:
+    if not ws_connected:
         return
-    
-    def async_send():
-        global ws_connected
-        try:
-            ws.send(cmd)
-        except Exception:
-            if ws_connected:
-                ws_connected = False
-                add_log("⚠️ ESP32 connection lost. Attempting reconnect...")
-                # C6 Fix: Only ONE thread should attempt reconnect
-                if esp32_reconnect_lock.acquire(blocking=False):
-                    try:
-                        connect_esp32()
-                    finally:
-                        esp32_reconnect_lock.release()
-                
-    threading.Thread(target=async_send, daemon=True).start()
+        
+    try:
+        esp32_cmd_queue.put_nowait(cmd)
+    except queue.Full:
+        pass # Drop command if queue is backed up (prevents memory leak)
 
 def esp32_listener():
     """Background thread to listen for ESP32 messages."""
@@ -310,17 +400,14 @@ def camera_loop():
                 continue
 
             while True:
-                # Grab 3 frames, only decode the last → always get the freshest
-                for _ in range(3):
-                    grabbed = stream_cap.grab()
-                if not grabbed:
+                ret, frame = stream_cap.read()
+                if not ret or frame is None:
                     add_log("📷 Phone stream dropped, reconnecting...")
                     break
-                ret, frame = stream_cap.retrieve()
-                if ret and frame is not None:
-                    frame = cv2.resize(frame, (640, 480))
-                    with frame_lock:
-                        latest_frame = frame.copy()
+                
+                frame = cv2.resize(frame, (640, 480))
+                with frame_lock:
+                    latest_frame = frame.copy()
                 time.sleep(0.01)
 
             stream_cap.release()
@@ -1195,32 +1282,8 @@ async def dashboard_broadcast_loop():
             pass
 
 # ============================================================
-# Startup
+# Startup completed via lifespan above
 # ============================================================
-@app.on_event("startup")
-def startup():
-    add_log("🚀 Backend starting up...")
-    
-    # Try connecting to ESP32
-    threading.Thread(target=connect_esp32, daemon=True).start()
-    
-    # Start camera capture thread
-    threading.Thread(target=camera_loop, daemon=True).start()
-    add_log("📷 Camera thread started")
-    
-    # Start unified YOLO loop (inference + navigation)
-    threading.Thread(target=yolo_loop, daemon=True).start()
-    add_log("🧠 YOLO loop started")
-    
-    # Start ESP32 listener thread
-    threading.Thread(target=esp32_listener, daemon=True).start()
-    add_log("👂 ESP32 listener thread started")
-    
-    # Start dashboard broadcast loop (async)
-    asyncio.get_event_loop().create_task(dashboard_broadcast_loop())
-    add_log("📡 WebSocket broadcast loop started")
-    
-    add_log("✅ All systems initialized!")
 
 if __name__ == "__main__":
     import uvicorn

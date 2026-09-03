@@ -25,36 +25,37 @@ class LaneFollower:
         # ── Road color sampling ──────────────────────────────────
         self.sample_w = 100          # width of each sampling strip (px)
         self.sample_h = 30           # height of each sampling strip (px)
-        self.color_thresh_day = 35   # max LAB distance in daylight
-        self.color_thresh_night = 42 # max LAB distance at night
-        self.color_thresh = 35       # active threshold (auto-adjusted)
+        self.color_thresh_day = 25   # tightened from 35
+        self.color_thresh_night = 25 # tightened massively from 42
+        self.color_thresh = 25       # active threshold (auto-adjusted)
 
         # ── Running-average road color ───────────────────────────
         self.road_color_history = deque(maxlen=15)
         self.road_color_ema = None
-        self.color_ema_alpha = 0.25  # 25% new, 75% history
+        self.color_ema_alpha = 1.0  # 100% new, no lag
 
         # ── Shadow recovery ──────────────────────────────────────
-        self.shadow_L_weight = 0.20  # heavily suppress L in distance calc
-        self.shadow_ab_thresh_pct = 0.55  # A/B-only pass threshold ratio
+        self.shadow_L_weight = 0.75  # Increased from 0.20 to FORCE it to care about brightness differences
+        self.active_shadow_L_weight = self.shadow_L_weight
+        self.shadow_ab_thresh_pct = 0.40  # Tightened from 0.55
 
         # ── Texture discrimination (auto-calibrated) ─────────────
         self.texture_enabled = True
         self.texture_block = 7       # local variance kernel size
-        self.texture_safety_mult = 4.0  # threshold = road_variance × this
-        self.texture_min_thresh = 400   # floor — never reject below this
-        self.texture_max_thresh = 2000  # ceiling — never accept above this
+        self.texture_safety_mult = 3.0  # tightened from 4.0
+        self.texture_min_thresh = 300   # floor
+        self.texture_max_thresh = 1500  # ceiling
 
         # ── Temporal mask blending ───────────────────────────────
         self.prev_mask = None
-        self.temporal_alpha = 0.75   # 75% current frame, 25% previous
+        self.temporal_alpha = 1.0   # 100% current frame, no lag
 
         # ── Road marking bridge ──────────────────────────────────
         self.marking_bridge_k = 25   # horizontal closing kernel width
         self.marking_max_gap = 40    # vertical gap to fill (px)
 
         # ── Intersection detection ────────────────────────────────
-        self.intersection_width_pct = 0.75  # road > 75% of frame = junction
+        self.intersection_width_pct = 0.85  # tightened from 0.75
         self.is_intersection = False
 
         # ── Night vision ─────────────────────────────────────────
@@ -71,8 +72,8 @@ class LaneFollower:
         self.open_k = 9
 
         # ── Boundary scanning ────────────────────────────────────
-        self.n_scans = 14            # scan lines for curve tracking
-        self.min_road_w_pct = 0.06
+        self.n_scans = 30            # Doubled scan lines for high precision curve tracking
+        self.min_road_w_pct = 0.04   # Allow slightly thinner road sections
 
         # ── PD steering ──────────────────────────────────────────
         self.Kp = 0.70
@@ -82,7 +83,7 @@ class LaneFollower:
         self.prev_err = 0.0
 
         # ── EMA smoothing ────────────────────────────────────────
-        self.alpha = 0.40
+        self.alpha = 0.80            # 80% new steering, much more responsive
         self.prev_steer = 0.0
 
         # ── Fallback safety ──────────────────────────────────────
@@ -153,6 +154,10 @@ class LaneFollower:
 
         # 8 ── Compute steering ────────────────────────────────────
         if valid >= 3:
+            if self.no_road_frames > 0:
+                self.prev_steer = 0.0
+                self.prev_err = 0.0
+                
             raw_steer, steering_cmd, debug_msg = self._compute_steering(
                 left_xs, right_xs, w
             )
@@ -307,7 +312,7 @@ class LaneFollower:
 
         # Layer 1: color distance with suppressed brightness
         diff_weighted = diff.copy()
-        diff_weighted[:, :, 0] *= self.shadow_L_weight  # L × 0.20
+        diff_weighted[:, :, 0] *= self.active_shadow_L_weight  
         dist = np.sqrt(np.sum(diff_weighted ** 2, axis=2))
         color_mask = (dist < self.color_thresh).astype(np.uint8) * 255
 
@@ -344,16 +349,24 @@ class LaneFollower:
         seed_y = h_roi - 1
         seed_x = w_roi // 2
         road_label = labels[seed_y, seed_x]
+        
         if road_label > 0:
             mask = ((labels == road_label) * 255).astype(np.uint8)
         else:
             # Bottom-center pixel missed — scan nearby
+            found = False
             for dx in range(-40, 41, 5):
                 sx = max(0, min(w_roi - 1, seed_x + dx))
                 lbl = labels[seed_y, sx]
                 if lbl > 0:
                     mask = ((labels == lbl) * 255).astype(np.uint8)
+                    found = True
                     break
+            
+            if not found:
+                # No seed found -> no usable road detected. 
+                # Return empty mask to safely trigger _fallback()
+                return np.zeros_like(mask)
 
         return mask
 
@@ -422,7 +435,7 @@ class LaneFollower:
 
     def _blend_temporal(self, mask):
         """
-        Blend current mask with previous frame's mask (75/25).
+        Blend current mask with previous frame's mask.
         Eliminates frame-to-frame flicker. Re-thresholds to binary
         so the mask doesn't degrade into grayscale over time.
         """
