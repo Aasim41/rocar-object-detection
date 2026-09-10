@@ -23,39 +23,39 @@ class LaneFollower:
 
     def __init__(self):
         # ── Road color sampling ──────────────────────────────────
-        self.sample_w = 100          # width of each sampling strip (px)
-        self.sample_h = 30           # height of each sampling strip (px)
-        self.color_thresh_day = 25   # tightened from 35
-        self.color_thresh_night = 25 # tightened massively from 42
-        self.color_thresh = 25       # active threshold (auto-adjusted)
+        self.sample_w = 100
+        self.sample_h = 30
+        self.color_thresh_day = 35   # Restored to original high-accuracy day
+        self.color_thresh_night = 42 # Restored to original night
+        self.color_thresh = 35
 
         # ── Running-average road color ───────────────────────────
         self.road_color_history = deque(maxlen=15)
         self.road_color_ema = None
-        self.color_ema_alpha = 1.0  # 100% new, no lag
+        self.color_ema_alpha = 1.0
 
         # ── Shadow recovery ──────────────────────────────────────
-        self.shadow_L_weight = 0.75  # Increased from 0.20 to FORCE it to care about brightness differences
+        self.shadow_L_weight = 0.25  
         self.active_shadow_L_weight = self.shadow_L_weight
-        self.shadow_ab_thresh_pct = 0.40  # Tightened from 0.55
+        self.shadow_ab_thresh_pct = 0.55  
 
         # ── Texture discrimination (auto-calibrated) ─────────────
-        self.texture_enabled = True
-        self.texture_block = 7       # local variance kernel size
-        self.texture_safety_mult = 3.0  # tightened from 4.0
-        self.texture_min_thresh = 300   # floor
-        self.texture_max_thresh = 1500  # ceiling
+        self.texture_enabled = True  # Restored! Prevents bleeding onto smooth walls
+        self.texture_block = 7
+        self.texture_safety_mult = 3.5
+        self.texture_min_thresh = 300
+        self.texture_max_thresh = 1500
 
         # ── Temporal mask blending ───────────────────────────────
         self.prev_mask = None
-        self.temporal_alpha = 1.0   # 100% current frame, no lag
+        self.temporal_alpha = 1.0
 
         # ── Road marking bridge ──────────────────────────────────
-        self.marking_bridge_k = 25   # horizontal closing kernel width
-        self.marking_max_gap = 40    # vertical gap to fill (px)
+        self.marking_bridge_k = 25
+        self.marking_max_gap = 40
 
         # ── Intersection detection ────────────────────────────────
-        self.intersection_width_pct = 0.85  # tightened from 0.75
+        self.intersection_width_pct = 0.80
         self.is_intersection = False
 
         # ── Night vision ─────────────────────────────────────────
@@ -331,6 +331,18 @@ class LaneFollower:
         if self.texture_enabled:
             texture_mask = self._compute_texture_mask(roi_bgr)
             mask = cv2.bitwise_and(mask, texture_mask)
+
+        # Layer 3.5: Structural Edge Boundaries (Baseboards & Walls)
+        # If walls and floor are the exact same color (e.g. white on white), 
+        # the color mask bleeds up the walls. Canny edge detection finds the physical
+        # corner where the wall meets the floor, and we carve it out as a black "moat".
+        gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 30, 100)
+        # Thicken the edge to ensure a solid barrier that stops region growing
+        k_edge = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        edges_thick = cv2.dilate(edges, k_edge, iterations=2)
+        # Subtract the edges from the color mask
+        mask[edges_thick > 0] = 0
 
         # Morphological cleanup
         k_close = cv2.getStructuringElement(

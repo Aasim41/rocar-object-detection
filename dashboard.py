@@ -715,6 +715,12 @@ with col_right:
     # --- MODE TOGGLE (static, no auto-refresh) ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-label">MODE CONTROL</div>', unsafe_allow_html=True)
+    
+    # Handle the pop-up logic after rerun
+    if st.session_state.get("open_manual_drive"):
+        components.html(f"<script>window.open('{BACKEND_URL}/drive', '_blank');</script>", height=0)
+        st.session_state["open_manual_drive"] = False
+
     if is_manual:
         if st.button("🔄  RESUME AUTONOMOUS", use_container_width=True, key="mode_btn"):
             toggle_mode("autonomous")
@@ -722,75 +728,31 @@ with col_right:
     else:
         if st.button("🚨  EMERGENCY OVERRIDE", use_container_width=True, key="mode_btn"):
             toggle_mode("manual")
+            st.session_state["open_manual_drive"] = True
             st.rerun()
+            
+    st.markdown('<div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;"></div>', unsafe_allow_html=True)
+    
+    routing_choice = st.selectbox("Routing Engine", ["Google Maps API", "Internal Graph (JUET)"], index=0, key="routing_engine")
+    engine_val = "google" if "Google" in routing_choice else "self"
+    
+    # Send choice to backend
+    if "last_routing_engine" not in st.session_state or st.session_state["last_routing_engine"] != engine_val:
+        st.session_state["last_routing_engine"] = engine_val
+        try:
+            requests.post(f"{BACKEND_URL}/backend/set_routing_engine", json={"engine": engine_val}, timeout=2)
+        except Exception:
+            pass
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- MANUAL DRIVE PAD (pure HTML/JS — zero Streamlit lag) ---
+    # --- MANUAL DRIVE PAD (Standalone Web App for Zero Latency) ---
     if is_manual:
-        drive_pad_html = f"""
-        <html>
-        <body style="margin:0; background:transparent;">
-        <div style="
-            background: rgba(24,24,27,0.6);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 24px;
-        ">
-            <div style="font-family:'Inter', sans-serif; font-size:11px; font-weight:700; color:#a1a1aa; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:16px;">
-                ● DRIVE CONTROLS
-            </div>
-            <style>
-                .dpad {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; max-width:240px; margin:0 auto; }}
-                .dpad-btn {{
-                    background: rgba(255,255,255,0.05);
-                    border: 1px solid rgba(255,255,255,0.12);
-                    border-radius: 10px;
-                    color: #ededed;
-                    font-family: 'Inter', sans-serif;
-                    font-size: 18px;
-                    font-weight: 600;
-                    padding: 14px 0;
-                    cursor: pointer;
-                    transition: all 0.15s ease;
-                    text-align: center;
-                    user-select: none;
-                    -webkit-user-select: none;
-                }}
-                .dpad-btn:hover {{ background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }}
-                .dpad-btn:active {{ background: rgba(255,255,255,0.15); transform: scale(0.95); }}
-                .dpad-stop {{
-                    background: rgba(239,68,68,0.15) !important;
-                    border-color: rgba(239,68,68,0.3) !important;
-                    color: #f87171 !important;
-                }}
-                .dpad-stop:hover {{ background: rgba(239,68,68,0.25) !important; }}
-                .dpad-label {{ font-size:9px; font-weight:500; color:#71717a; margin-top:2px; letter-spacing:1px; }}
-            </style>
-            <div class="dpad">
-                <div></div>
-                <button class="dpad-btn" onclick="sendCmd('forward')">▲<div class="dpad-label">FWD</div></button>
-                <div></div>
-                <button class="dpad-btn" onclick="sendCmd('left')">◄<div class="dpad-label">LFT</div></button>
-                <button class="dpad-btn dpad-stop" onclick="sendCmd('stop')">■<div class="dpad-label">STOP</div></button>
-                <button class="dpad-btn" onclick="sendCmd('right')">►<div class="dpad-label">RGT</div></button>
-                <div></div>
-                <button class="dpad-btn" onclick="sendCmd('reverse')">▼<div class="dpad-label">REV</div></button>
-                <div></div>
-            </div>
-        </div>
-        <script>
-            function sendCmd(action) {{
-                fetch("{BACKEND_URL}/backend/manual_control", {{
-                    method: "POST",
-                    headers: {{"Content-Type": "application/json"}},
-                    body: JSON.stringify({{action: action}})
-                }}).catch(e => console.error("Command failed:", e));
-            }}
-        </script>
-        </body>
-        </html>
-        """
-        components.html(drive_pad_html, height=270, scrolling=False)
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">🕹️ REMOTE CONTROL</div>', unsafe_allow_html=True)
+        st.markdown("<p style='color:#a1a1aa; font-size:14px; margin-bottom:15px;'>The heavy Streamlit manual drive has been replaced with a high-performance, zero-latency web controller.</p>", unsafe_allow_html=True)
+        st.markdown(f'<a href="{BACKEND_URL}/drive" target="_blank" style="display:block; width:100%; text-align:center; background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#60a5fa; padding:15px; border-radius:12px; font-weight:bold; text-decoration:none; font-family:Inter;">🚀 OPEN MANUAL DRIVE PAD</a>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # --- CARGO LATCH (static, no auto-refresh) ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)

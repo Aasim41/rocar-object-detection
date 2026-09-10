@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RoCAR - Manual Drive</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0A0A0B;
+            --panel-bg: #18181b;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Top Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(24, 24, 27, 0.8);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .title { font-weight: 800; font-size: 18px; letter-spacing: 1px; }
+        .status-badge {
+            background: rgba(255,255,255,0.1);
+            padding: 5px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        /* Video Feed */
+        .video-container {
+            width: 100%;
+            height: 35vh;
+            background: #000;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 2px solid rgba(255,255,255,0.05);
+        }
+        .video-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .vid-overlay {
+            position: absolute;
+            top: 10px; left: 10px;
+            color: rgba(255,255,255,0.7);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* Controls Section */
+        .controls {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        /* Mode Toggle */
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 400px;
+        }
+        .btn {
+            flex: 1;
+            padding: 15px;
+            border-radius: 12px;
+            border: none;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            text-transform: uppercase;
+        }
+        .btn-override {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .btn-resume {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        .btn:active { transform: scale(0.96); }
+
+        /* D-Pad */
+        .dpad-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 80px);
+            grid-template-rows: repeat(3, 80px);
+            gap: 12px;
+            margin-top: 10px;
+        }
+        .dbtn {
+            background: var(--panel-bg);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            color: var(--text-main);
+            font-size: 28px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.05s ease;
+        }
+        .dbtn:active, .dbtn.active {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.3);
+            transform: scale(0.95);
+        }
+        .dbtn-stop {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: var(--danger);
+            font-size: 24px;
+        }
+        .dbtn-stop:active, .dbtn-stop.active {
+            background: rgba(239, 68, 68, 0.4);
+        }
+
+        /* Keyboard hint */
+        .hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="title">RoCAR DRIVE</div>
+        <div class="status-badge" id="status-badge">Checking...</div>
+    </header>
+
+    <div class="video-container">
+        <div class="vid-overlay">● LIVE YOLOV8</div>
+        <img id="video-feed" src="/video_feed" onerror="this.onerror=null; this.src=''; this.alt='Video Offline';" alt="Loading Feed...">
+    </div>
+
+    <div class="controls">
+        <div class="mode-toggle">
+            <button class="btn btn-override" onclick="setMode('manual')">🚨 Override</button>
+            <button class="btn btn-resume" onclick="setMode('autonomous')">🔄 Auto</button>
+        </div>
+
+        <div class="dpad-grid">
+            <div></div>
+            <div class="dbtn" id="btn-forward" onmousedown="sendCmd('forward')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('forward')" ontouchend="sendCmd('stop')">▲</div>
+            <div></div>
+            
+            <div class="dbtn" id="btn-left" onmousedown="sendCmd('left')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('left')" ontouchend="sendCmd('stop')">◄</div>
+            <div class="dbtn dbtn-stop" id="btn-stop" onclick="sendCmd('stop')">■</div>
+            <div class="dbtn" id="btn-right" onmousedown="sendCmd('right')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('right')" ontouchend="sendCmd('stop')">►</div>
+            
+            <div></div>
+            <div class="dbtn" id="btn-reverse" onmousedown="sendCmd('reverse')" onmouseup="sendCmd('stop')" ontouchstart="sendCmd('reverse')" ontouchend="sendCmd('stop')">▼</div>
+            <div></div>
+        </div>
+        
+        <div class="hint">Use W A S D keys on Desktop.<br>Tap and hold on Mobile.</div>
+    </div>
+
+    <script>
+        const host = window.location.origin;
+
+        // Auto-refresh video if it breaks
+        setInterval(() => {
+            let img = document.getElementById('video-feed');
+            if(!img.complete || img.naturalHeight === 0) {
+                img.src = "/video_feed?t=" + new Date().getTime();
+            }
+        }, 3000);
+
+        // Fetch Mode Status
+        async function checkStatus() {
+            try {
+                let res = await fetch(host + "/status");
+                let data = await res.json();
+                let badge = document.getElementById("status-badge");
+                if (data.mode === "manual") {
+                    badge.innerText = "MANUAL";
+                    badge.style.color = "#ef4444";
+                } else {
+                    badge.innerText = "AUTO";
+                    badge.style.color = "#22c55e";
+                }
+            } catch (e) {
+                document.getElementById("status-badge").innerText = "OFFLINE";
+            }
+        }
+        setInterval(checkStatus, 2000);
+        checkStatus();
+
+        // Mode Switching
+        function setMode(mode) {
+            fetch(host + "/set_mode", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({mode: mode})
+            }).then(checkStatus);
+        }
+
+        // Send Drive Commands
+        function sendCmd(action) {
+            // Prevent default touch behaviors like zooming/scrolling
+            if(event && event.type.startsWith('touch')) event.preventDefault();
+            
+            fetch(host + "/backend/manual_control", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({action: action})
+            });
+        }
+
+        // Keyboard Controls
+        const keyMap = { 'w': 'forward', 'a': 'left', 's': 'reverse', 'd': 'right' };
+        let activeKey = null;
+
+        document.addEventListener('keydown', (e) => {
+            if(e.repeat) return; // ignore hold repeats
+            let key = e.key.toLowerCase();
+            if(keyMap[key]) {
+                activeKey = key;
+                sendCmd(keyMap[key]);
+                document.getElementById('btn-' + keyMap[key]).classList.add('active');
+            } else if (key === ' ') {
+                sendCmd('stop');
+                document.getElementById('btn-stop').classList.add('active');
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            let key = e.key.toLowerCase();
+            if(keyMap[key]) {
+                if(activeKey === key) {
+                    sendCmd('stop');
+                    activeKey = null;
+                }
+                document.getElementById('btn-' + keyMap[key]).classList.remove('active');
+            } else if (key === ' ') {
+                document.getElementById('btn-stop').classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>
+

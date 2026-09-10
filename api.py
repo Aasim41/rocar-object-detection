@@ -45,6 +45,9 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     add_log("🚀 Backend starting up...")
     
+    # Start the ESP32 sender queue worker
+    threading.Thread(target=esp32_sender_worker, daemon=True).start()
+    
     # Try connecting to ESP32
     threading.Thread(target=connect_esp32, daemon=True).start()
     
@@ -221,8 +224,12 @@ CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "0").strip()
 if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
 
-cap = cv2.VideoCapture(CAMERA_SOURCE)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+use_url = isinstance(CAMERA_SOURCE, str)
+if not use_url:
+    cap = cv2.VideoCapture(CAMERA_SOURCE)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+else:
+    cap = None
 latest_frame = None
 annotated_frame = None
 frame_lock = threading.Lock()
@@ -258,8 +265,7 @@ def esp32_sender_worker():
                             esp32_reconnect_lock.release()
         esp32_cmd_queue.task_done()
 
-# Start the sender worker
-threading.Thread(target=esp32_sender_worker, daemon=True).start()
+# (The sender worker thread is now started safely inside the lifespan block)
 
 def connect_esp32():
     """Connect to ESP32 WebSocket server."""
@@ -820,6 +826,15 @@ def get_gps_app():
     except FileNotFoundError:
         return HTMLResponse(content="<h1>gps_app.html not found!</h1>", status_code=404)
 
+@app.get("/drive")
+def get_manual_drive():
+    """Serves the ultra-low latency Manual Drive web controller."""
+    try:
+        with open("manual_drive.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>manual_drive.html not found!</h1>", status_code=404)
+
 @app.get("/status")
 async def get_status():
     """Get current bot telemetry."""
@@ -840,9 +855,9 @@ async def get_status():
         "gps_speed": gps_speed,
         "gps_accuracy": gps_accuracy,
         "tracking_clients": len(tracking_clients),
-        "camera_active": cap.isOpened() if cap else False,
-        "log_history": log_history[-20:],
-        "esp_commands": esp_commands[-20:],
+        "camera_active": latest_frame is not None,
+        "log_history": list(log_history)[-20:],
+        "esp_commands": list(esp_commands)[-20:],
         "map_data": {
             "live_location": live_location,
             "source": source_location,
@@ -883,6 +898,20 @@ async def manual_control(req: ControlRequest):
         add_log(f"Manual override: {cmd.upper()}")
         return {"status": "success", "command": cmd}
     return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid command"})
+
+@app.post("/backend/set_routing_engine")
+async def set_routing(req: Request):
+    """Set the routing engine to google or self."""
+    body = await req.body()
+    try:
+        data = json.loads(body.decode("utf-8"))
+        engine = data.get("engine", "google")
+        from navigation.pipeline import set_routing_engine
+        set_routing_engine(engine)
+        add_log(f"🔄 Routing Engine changed to: {engine.upper()}")
+        return {"status": "success", "engine": engine}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 @app.post("/backend/coordinates/destinations")
 async def get_coordinates(req: Request):
@@ -1006,9 +1035,9 @@ async def broadcast_to_dashboard():
         "gps_speed": gps_speed,
         "gps_accuracy": gps_accuracy,
         "tracking_clients": len(tracking_clients),
-        "camera_active": cap.isOpened() if cap else False,
-        "log_history": log_history[-20:],
-        "esp_commands": esp_commands[-20:],
+        "camera_active": latest_frame is not None,
+        "log_history": list(log_history)[-20:],
+        "esp_commands": list(esp_commands)[-20:],
         "map_data": {
             "live_location": live_location,
             "source": source_location,

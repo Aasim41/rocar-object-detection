@@ -31,6 +31,7 @@
 #define SPEED_FULL   255
 #define SPEED_SLOW   120   // ~47% for obstacle approach
 #define SPEED_TURN   180   // ~70% for rolling turns (inner wheel)
+#define SPEED_DRIFT  160   // Speed for tank/drift steering
 
 // --- Servo Pins ---
 #define CARGO_SERVO_PIN  18   // Cargo lock servo
@@ -158,18 +159,20 @@ void driveReverse() {
 }
 
 void turnLeft() {
+  // DRIFT STEER: Left reverse, Right forward
   safeDirectionChange(2);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-  setMotorSpeed(SPEED_TURN, SPEED_FULL);
+  setMotorSpeed(SPEED_DRIFT, SPEED_DRIFT);
   currentDirection = 2;
 }
 
 void turnRight() {
+  // DRIFT STEER: Left forward, Right reverse
   safeDirectionChange(-2);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-  setMotorSpeed(SPEED_FULL, SPEED_TURN);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  setMotorSpeed(SPEED_DRIFT, SPEED_DRIFT);
   currentDirection = -2;
 }
 
