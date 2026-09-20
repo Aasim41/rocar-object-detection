@@ -556,7 +556,7 @@ class LaneFollower:
         if self.no_road_frames > self.max_lost:
             self.prev_steer = 0.0
             self.prev_err = 0.0
-            return 0.0, "forward", "ROAD LOST — cruising straight"
+            return 0.0, "stop", "ROAD LOST — SAFETY STOP"
 
         raw = self.prev_steer * 0.90
         self.prev_steer = raw

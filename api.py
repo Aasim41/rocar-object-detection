@@ -48,8 +48,9 @@ async def lifespan(app: FastAPI):
     # Start the ESP32 sender queue worker
     threading.Thread(target=esp32_sender_worker, daemon=True).start()
     
-    # Try connecting to ESP32
+    # Try connecting to ESP32 / Arduino (and keep retrying automatically)
     threading.Thread(target=connect_esp32, daemon=True).start()
+    threading.Thread(target=esp32_reconnect_worker, daemon=True).start()
     
     # Start camera capture thread
     threading.Thread(target=camera_loop, daemon=True).start()
@@ -158,8 +159,9 @@ current_heading = 0.0
 current_route = []
 waypoint_index = 0  # Tracks which waypoint the cart is currently heading toward
 stored_deliver_points = []
-active_phase = "IDLE"  # IDLE, PICKUP, AWAITING_PACKING, DELIVERY
-cargo_state = "OPEN"  # OPEN, LOCKED
+active_phase = "IDLE"  # IDLE, PICKUP, AWAITING_PACKING, DELIVERY, RETURNING
+cargo_state = "LOCKED"  # LOCKED on boot (matches firmware servo at 0°)
+shop_return_location = None  # Saved shop location for return trip
 current_mode = "autonomous"  # "autonomous" or "manual"
 current_status = "INITIALIZING"
 latest_log = "System starting up..."
@@ -232,20 +234,22 @@ else:
     cap = None
 latest_frame = None
 annotated_frame = None
+annotated_jpeg = None  # Pre-compressed JPEG buffer for zero-latency streaming
 frame_lock = threading.Lock()
 annotated_lock = threading.Lock()
 
 import queue
 
 # ============================================================
-# ESP32 WebSocket Connection
+# Bot Hardware Connection (ESP32 direct or Arduino via Phone Relay)
 # ============================================================
 ws = None
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
+BOT_WS_URL = os.environ.get("BOT_WS_URL", "ws://192.168.4.1:81/")
 
 def esp32_sender_worker():
-    """Background thread that consumes the command queue and sends to ESP32."""
+    """Background thread that consumes the command queue and sends to bot."""
     global ws, ws_connected
     while True:
         cmd = esp32_cmd_queue.get()
@@ -257,32 +261,34 @@ def esp32_sender_worker():
             except Exception as e:
                 if ws_connected:
                     ws_connected = False
-                    add_log(f"⚠️ ESP32 send failed: {e}. Attempting reconnect...")
-                    if esp32_reconnect_lock.acquire(blocking=False):
-                        try:
-                            connect_esp32()
-                        finally:
-                            esp32_reconnect_lock.release()
+                    add_log(f"⚠️ Bot send failed: {e}. Reconnecting...")
         esp32_cmd_queue.task_done()
 
-# (The sender worker thread is now started safely inside the lifespan block)
-
 def connect_esp32():
-    """Connect to ESP32 WebSocket server."""
+    """Connect to ESP32 or Phone-Arduino WebSocket server."""
     global ws, ws_connected
     if not WS_AVAILABLE:
         return
     try:
         ws = websocket.WebSocket()
         ws.settimeout(2)
-        ws.connect("ws://192.168.4.1:81/")
+        ws.connect(BOT_WS_URL)
         ws_connected = True
-        add_log("✅ Connected to ESP32 WebSocket")
-        print("✅ Connected to ESP32 WebSocket")
+        add_log(f"✅ Connected to bot hardware at {BOT_WS_URL}")
+        print(f"✅ Connected to bot hardware at {BOT_WS_URL}")
     except Exception as e:
         ws_connected = False
-        add_log(f"⚠️ ESP32 not connected: {e}")
-        print(f"⚠️ ESP32 connection failed: {e}")
+
+def esp32_reconnect_worker():
+    """Continuous background worker to ensure auto-reconnect to bot hardware."""
+    while True:
+        if not ws_connected and WS_AVAILABLE:
+            if esp32_reconnect_lock.acquire(blocking=False):
+                try:
+                    connect_esp32()
+                finally:
+                    esp32_reconnect_lock.release()
+        time.sleep(3.0)
 
 def send_esp32(cmd: str):
     """Queue a command to ESP32 via WebSocket without blocking the AI loop."""
@@ -397,7 +403,7 @@ def camera_loop():
             continue
 
         if use_url:
-            # ── Phone IP camera (OpenCV MJPEG with frame-skipping) ──
+            # ── Phone IP camera (Zero-latency grabber) ──
             stream_cap = cv2.VideoCapture(CAMERA_SOURCE)
             stream_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not stream_cap.isOpened():
@@ -406,36 +412,45 @@ def camera_loop():
                 continue
 
             while True:
-                ret, frame = stream_cap.read()
-                if not ret or frame is None:
+                # Fast grab to drop accumulated queue frames in OpenCV
+                ret = stream_cap.grab()
+                if not ret:
                     add_log("📷 Phone stream dropped, reconnecting...")
                     break
+                ret, frame = stream_cap.retrieve()
+                if not ret or frame is None:
+                    break
                 
-                frame = cv2.resize(frame, (640, 480))
+                if frame.shape[1] != 640 or frame.shape[0] != 480:
+                    frame = cv2.resize(frame, (640, 480))
                 with frame_lock:
-                    latest_frame = frame.copy()
-                time.sleep(0.01)
+                    latest_frame = frame
+                # Do NOT sleep here — let hardware stream pace the loop without buffering lag
 
             stream_cap.release()
             time.sleep(1.0)
         else:
             # ── Local USB / laptop webcam ──
             if cap.isOpened():
-                ret, frame = cap.read()
+                ret = cap.grab()
                 if ret:
-                    frame = cv2.resize(frame, (640, 480))
-                    with frame_lock:
-                        latest_frame = frame.copy()
-            time.sleep(0.03)  # ~30 FPS
+                    _, frame = cap.retrieve()
+                    if frame is not None:
+                        if frame.shape[1] != 640 or frame.shape[0] != 480:
+                            frame = cv2.resize(frame, (640, 480))
+                        with frame_lock:
+                            latest_frame = frame
+            time.sleep(0.01)
 
 # ============================================================
 # Background: Autonomous YOLO Loop
 # ============================================================
 def yolo_loop():
     """Single YOLO loop: runs inference once and caches the annotated frame."""
-    global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
+    global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, annotated_jpeg
+    global current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
     global obstacle_stopped_since, obstacle_creep_active, obstacle_creep_start, scan_servo_angle
-    add_log("🤖 YOLO loop started")
+    add_log("🤖 YOLO loop started (Low-Latency Mode)")
     
     while True:
         try:
@@ -443,18 +458,20 @@ def yolo_loop():
                 frame = latest_frame.copy() if latest_frame is not None else None
             
             if frame is None:
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
             
             if current_mode == "manual":
-                # Skip YOLO inference in manual mode to save CPU and remove latency
+                # In manual mode: bypass YOLO to give maximum FPS and 0ms latency
                 with annotated_lock:
                     annotated_frame = frame
-                time.sleep(0.03)
+                    _, jpeg_buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                    annotated_jpeg = jpeg_buf.tobytes()
+                time.sleep(0.02)
                 continue
                 
-            # Run YOLO once (only in autonomous mode)
-            results = model(frame, conf=0.50, verbose=False)
+            # Run YOLO with imgsz=416 for 2x faster inference and minimal lag
+            results = model(frame, imgsz=416, conf=0.45, verbose=False)
             ann = results[0].plot()
             
             # ALWAYS process for lane tracking so the dashboard always shows the tracking lines
@@ -463,9 +480,11 @@ def yolo_loop():
             global last_webots_steer
             last_webots_steer = lane_steer
             
-            # Cache the annotated frame for the video feed
+            # Cache the annotated frame and pre-encode JPEG in background thread
             with annotated_lock:
                 annotated_frame = ann
+                _, jpeg_buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                annotated_jpeg = jpeg_buf.tobytes()
             
             # Only do navigation logic in autonomous mode
             if current_mode == "autonomous":
@@ -683,6 +702,15 @@ def yolo_loop():
                     obstacle_stopped_since = None
                     obstacle_creep_active = False
                     
+                    # SAFETY: Don't drive if we have no active mission
+                    if active_phase in ["IDLE", "AWAITING_PACKING"]:
+                        send_esp32("stop")
+                        if active_phase == "IDLE":
+                            current_status = "⏸️ IDLE — Waiting for order"
+                        else:
+                            current_status = "📦 Waiting for shopkeeper to pack"
+                        continue
+                    
                     # 1. Start with the Lane Follower
                     nav_cmd = lane_cmd
                     nav_msg = lane_msg
@@ -708,16 +736,26 @@ def yolo_loop():
                                     send_esp32("unlock")
                                     cargo_state = "OPEN"
                                     active_phase = "AWAITING_PACKING"
+                                    shop_return_location = source_location.copy() if source_location else None
                                     current_route = []
                                     waypoint_index = 0
-                                else:
+                                elif active_phase == "DELIVERY":
                                     nav_msg = "🎯 DESTINATION REACHED → WAITING FOR OTP"
                                     current_status = nav_msg
                                     active_phase = "IDLE"
                                     current_route = []
                                     waypoint_index = 0
                                     destination_location = None
+                                elif active_phase == "RETURNING":
+                                    nav_msg = "🏠 RETURNED TO SHOP → IDLE"
+                                    current_status = nav_msg
+                                    add_log("✅ Cart has returned to the shop!")
+                                    active_phase = "IDLE"
+                                    current_route = []
+                                    waypoint_index = 0
                                     source_location = None
+                                    destination_location = None
+                                    shop_return_location = None
                             else:
                                 nav_result = navigate(current_heading, live_location, current_route, waypoint_index)
                                 gps_cmd = nav_result.get("command", "F")
@@ -728,7 +766,7 @@ def yolo_loop():
                                     wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
                                     nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
                                 
-                                cmd_map = {"F": "forward", "L": "left", "SL": "forward", "R": "right", "SR": "forward"}
+                                cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
                                 gps_cmd = cmd_map.get(gps_cmd, "forward")
                                 
                                 # At intersections, GPS ALWAYS overrides lane following
@@ -752,9 +790,7 @@ def yolo_loop():
                     if scan_servo_angle != target_scan_angle:
                         send_esp32(target_scan_angle)
                         scan_servo_angle = target_scan_angle
-                    # ── Speed modulation: slow down on curves ──
-                    if nav_cmd in ("left", "right") and abs(lane_steer) > 0.15:
-                        send_esp32("slow")   # reduce speed first
+                    # ── Send the navigation command ──
                     send_esp32(nav_cmd)
                     # Keep continuous steer for Webots; send_esp32 may override for dodges/GPS turns
                     if nav_cmd == "forward":
@@ -802,16 +838,16 @@ def root():
 
 @app.get("/video_feed")
 async def video_feed():
-    """Stream pre-annotated YOLO frames as MJPEG (no extra inference)."""
+    """Stream pre-annotated YOLO frames as MJPEG with zero latency."""
     async def generate():
+        last_sent = None
         while True:
-            with annotated_lock:
-                frame = annotated_frame.copy() if annotated_frame is not None else None
-            if frame is not None:
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            jpeg = annotated_jpeg
+            if jpeg is not None and jpeg is not last_sent:
+                last_sent = jpeg
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-            await asyncio.sleep(0.03)
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+            await asyncio.sleep(0.015)
     
     return StreamingResponse(generate(), media_type='multipart/x-mixed-replace; boundary=frame')
 
@@ -999,15 +1035,54 @@ async def update_live_location(req: Request):
     
 @app.post("/backend/unlock")
 async def unlock_cart(req: Request):
-    """Triggered when the user enters the OTP."""
-    global current_status, current_route, active_phase, cargo_state
+    """Triggered when the user enters the OTP. After unlocking, cart returns to shop."""
+    global current_status, current_route, active_phase, cargo_state, source_location, destination_location, waypoint_index, shop_return_location
     send_esp32("unlock")
     with state_lock:
         cargo_state = "OPEN"
-        current_status = "🔓 DESTINATION REACHED -> CARGO UNLOCKED"
+        current_status = "🔓 CARGO UNLOCKED → Customer collecting order..."
         active_phase = "IDLE"
-    add_log("Customer unlocked cargo. Delivery completed!")
-    return {"status": "success", "message": "Unlocked"}
+    add_log("🔓 Customer unlocked cargo. Waiting 30s for collection...")
+    
+    # Wait for customer to collect the order, then lock and return
+    import asyncio
+    await asyncio.sleep(30)
+    
+    send_esp32("lock")
+    with state_lock:
+        cargo_state = "LOCKED"
+    add_log("🔒 Cargo locked. Preparing return route to shop...")
+    
+    # Build return route
+    if shop_return_location and live_location:
+        try:
+            from navigation.pipeline import fetch_routes
+            kart_obj = KartCoordinates(latitude=live_location["lat"], longitude=live_location["lng"], heading=current_heading)
+            shop_obj = Coordinates(latitude=shop_return_location["lat"], longitude=shop_return_location["lng"])
+            
+            # Reuse fetch_routes but just for the return leg
+            return_routes = fetch_routes(kart_obj, shop_obj, shop_obj)
+            return_points = return_routes.get("receive_points", [])
+            
+            with state_lock:
+                current_route = return_points
+                waypoint_index = 0
+                destination_location = shop_return_location
+                source_location = None
+                active_phase = "RETURNING"
+                current_status = f"🏠 RETURNING TO SHOP ({len(return_points)} waypoints)"
+            add_log(f"🏠 Return route calculated: {len(return_points)} waypoints back to shop")
+        except Exception as e:
+            add_log(f"⚠️ Could not calculate return route: {e}")
+            with state_lock:
+                active_phase = "IDLE"
+                current_status = "⏸️ IDLE — Return route failed"
+    else:
+        add_log("⚠️ No shop location saved — cannot return")
+        with state_lock:
+            active_phase = "IDLE"
+    
+    return {"status": "success", "message": "Unlocked and returning to shop"}
 
 # ============================================================
 # WebSocket Broadcast Helpers
@@ -1157,8 +1232,8 @@ async def ws_gps(websocket: WebSocket):
             
             new_location = gps_ema_location.copy()
             
-            # ── Heading: prefer phone compass when moving ──
-            if "heading" in data and data["heading"] is not None and speed > 1.0:
+            # ── Heading: always accept phone compass when available ──
+            if "heading" in data and data["heading"] is not None:
                 current_heading = data["heading"]
             elif live_location is not None:
                 try:
