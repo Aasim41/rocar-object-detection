@@ -9,3 +9,4 @@ requests>=2.31.0
 streamlit>=1.28.0
 plotly>=5.18.0
 scipy>=1.11.0
+razorpay>=1.4.0

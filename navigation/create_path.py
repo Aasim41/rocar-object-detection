@@ -26,10 +26,7 @@ def get_google_route(origin, destination):
         "X-Goog-FieldMask": (
             "routes.distanceMeters,"
             "routes.duration,"
-            "routes.legs.steps.distanceMeters,"
-            "routes.legs.steps.startLocation,"
-            "routes.legs.steps.endLocation,"
-            "routes.steps.polyline"
+            "routes.polyline.encodedPolyline"
         )
     }
     response = requests.post(

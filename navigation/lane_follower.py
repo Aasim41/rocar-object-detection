@@ -25,28 +25,23 @@ class LaneFollower:
         # ── Road color sampling ──────────────────────────────────
         self.sample_w = 100
         self.sample_h = 30
-        self.color_thresh_day = 35   # Restored to original high-accuracy day
-        self.color_thresh_night = 42 # Restored to original night
+        self.color_thresh_day = 35
+        self.color_thresh_night = 42
         self.color_thresh = 35
 
-        # ── Running-average road color ───────────────────────────
-        self.road_color_history = deque(maxlen=15)
         self.road_color_ema = None
         self.color_ema_alpha = 1.0
 
-        # ── Shadow recovery ──────────────────────────────────────
-        self.shadow_L_weight = 0.25  
+        self.shadow_L_weight = 0.25
         self.active_shadow_L_weight = self.shadow_L_weight
-        self.shadow_ab_thresh_pct = 0.55  
+        self.shadow_ab_thresh_pct = 0.55
 
-        # ── Texture discrimination (auto-calibrated) ─────────────
-        self.texture_enabled = True  # Restored! Prevents bleeding onto smooth walls
+        self.texture_enabled = True
         self.texture_block = 7
         self.texture_safety_mult = 3.5
         self.texture_min_thresh = 300
         self.texture_max_thresh = 1500
 
-        # ── Temporal mask blending ───────────────────────────────
         self.prev_mask = None
         self.temporal_alpha = 1.0
 

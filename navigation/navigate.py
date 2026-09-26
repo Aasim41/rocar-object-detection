@@ -51,14 +51,12 @@ def navigate(heading, current_coords, points, waypoint_index=0):
         dict with "command" (F/L/R/SL/SR) and "waypoint_index" (updated index)
     """
     if not points:
-        return {"command": "F", "waypoint_index": waypoint_index}
+        return {"command": "STOP", "waypoint_index": waypoint_index, "route_complete": True}
 
-    # Use the progressive tracker instead of the old closest-point finder
     next_point, new_index = get_next_waypoint(current_coords, points, waypoint_index)
     
     if next_point is None:
-        # We've passed all waypoints — route complete
-        return {"command": "F", "waypoint_index": new_index, "route_complete": True}
+        return {"command": "STOP", "waypoint_index": new_index, "route_complete": True}
 
     desired_bearing = calculate_bearing(current_coords, next_point)
     angle_error = angle_difference(desired_bearing, heading)

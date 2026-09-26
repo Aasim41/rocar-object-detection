@@ -29,11 +29,7 @@ from navigation.fnpp import to_tuple, calculate_distance
 from navigation.lane_follower import LaneFollower
 
 lane_follower = LaneFollower()
-
-# H1 Fix: Thread lock for shared navigation/phase state
 state_lock = threading.Lock()
-
-# C6 Fix: Reconnection lock — only one thread can reconnect at a time
 esp32_reconnect_lock = threading.Lock()
 
 # ============================================================
@@ -386,8 +382,6 @@ def add_log(message: str):
     entry = f"[{timestamp}] {message}"
     latest_log = entry
     log_history.append(entry)
-    if len(log_history) > 100:
-        log_history = log_history[-100:]
 
 # ============================================================
 # Background: Camera Capture
@@ -1045,7 +1039,6 @@ async def unlock_cart(req: Request):
     add_log("🔓 Customer unlocked cargo. Waiting 30s for collection...")
     
     # Wait for customer to collect the order, then lock and return
-    import asyncio
     await asyncio.sleep(30)
     
     send_esp32("lock")

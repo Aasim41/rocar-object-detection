@@ -1,20 +1,19 @@
 import math
 
 def calculate_distance(point1, point2):
+    """Calculate great-circle distance in meters between two (lat, lng) points."""
     lat1, lon1 = point1
     lat2, lon2 = point2
-    lat1 = math.radians(lat1)
-    lat2 = math.radians(lat2)
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
     delta_lat = math.radians(lat2 - lat1)
     delta_lon = math.radians(lon2 - lon1)
     a = (
         math.sin(delta_lat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2)
+        + math.cos(phi1) * math.cos(phi2)
         * math.sin(delta_lon / 2) ** 2
     )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    EARTH_RADIUS = 6371000
-    return EARTH_RADIUS * c
+    return 6371000 * c
 
 
 def to_tuple(coords):

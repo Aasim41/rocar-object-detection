@@ -568,9 +568,9 @@ with col_left:
             st.markdown('<div class="log-terminal"><div class="log-line" style="color:#334155; text-align:center;">Waiting for log data...</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # --- ESP32 COMMAND TERMINAL ---
+        # --- BOT HARDWARE COMMAND TERMINAL ---
         st.markdown('<div class="panel" style="margin-top: 14px;">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">ESP32 TELEMETRY</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">BOT HARDWARE TELEMETRY</div>', unsafe_allow_html=True)
     
         esp_history = s.get("esp_commands", [])
         if esp_history:
@@ -591,7 +591,7 @@ with col_left:
                     esp_html += f'<div class="log-line">{html.escape(log)}</div>'
             st.markdown(f'<div class="log-terminal" style="max-height:150px;">{esp_html}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="log-terminal" style="max-height:150px;"><div class="log-line" style="color:#334155; text-align:center;">No ESP32 telemetry...</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="log-terminal" style="max-height:150px;"><div class="log-line" style="color:#334155; text-align:center;">No hardware telemetry...</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     render_system_log()
@@ -712,7 +712,7 @@ with col_right:
     
     render_status_telemetry()
 
-    # --- MODE TOGGLE (static, no auto-refresh) ---
+    # --- MODE TOGGLE ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-label">MODE CONTROL</div>', unsafe_allow_html=True)
     
@@ -721,7 +721,10 @@ with col_right:
         components.html(f"<script>window.open('{BACKEND_URL}/drive', '_blank');</script>", height=0)
         st.session_state["open_manual_drive"] = False
 
-    if is_manual:
+    mode_status = fetch_status() or status_data
+    is_manual_now = mode_status.get("mode") == "manual"
+
+    if is_manual_now:
         if st.button("🔄  RESUME AUTONOMOUS", use_container_width=True, key="mode_btn"):
             toggle_mode("autonomous")
             st.rerun()
@@ -747,7 +750,7 @@ with col_right:
     st.markdown('</div>', unsafe_allow_html=True)
 
     # --- MANUAL DRIVE PAD (Standalone Web App for Zero Latency) ---
-    if is_manual:
+    if is_manual_now:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.markdown('<div class="panel-label">🕹️ REMOTE CONTROL</div>', unsafe_allow_html=True)
         st.markdown("<p style='color:#a1a1aa; font-size:14px; margin-bottom:15px;'>The heavy Streamlit manual drive has been replaced with a high-performance, zero-latency web controller.</p>", unsafe_allow_html=True)
