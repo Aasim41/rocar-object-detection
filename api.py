@@ -600,10 +600,7 @@ def yolo_loop():
                     
                     can_go_around = gap_ratio > 0.20 and total_area_ratio < 0.40 and gap_has_road
                     
-                    # ─── DECISION TREE ───
-                    
                     if is_fast_approaching and total_area_ratio > 0.05:
-                        # ── EMERGENCY: Fast Approach ──
                         current_status = f"🛑 FAST {closest_name} — EMERGENCY STOP"
                         send_esp32("beep")
                         send_esp32("stop")
@@ -612,7 +609,6 @@ def yolo_loop():
                             obstacle_stopped_since = time.time()
                             
                     elif dist_cm < 20:
-                        # PHYSICAL COLLISION IMMINENT — hard stop no matter what
                         current_status = f"🛑 {closest_name} COLLISION ({dist_cm}cm) — STOP"
                         send_esp32("stop")
                         obstacle_detected = True
@@ -620,8 +616,6 @@ def yolo_loop():
                             obstacle_stopped_since = time.time()
                             
                     elif can_go_around:
-                        # ── PRIMARY: Steer around the obstacle ──
-                        # This is the PREFERRED behavior at ANY distance
                         obstacle_stopped_since = None
                         obstacle_creep_active = False
                         
@@ -642,8 +636,6 @@ def yolo_loop():
                         obstacle_detected = True
                     
                     elif is_moving_away and dist_cm > 50:
-                        # ── SECONDARY: Follow at distance ──
-                        # Obstacle is ahead but walking away — trail behind it
                         obstacle_stopped_since = None
                         obstacle_creep_active = False
                         current_status = f"🚶 Following {closest_name} ({dist_cm}cm, moving away)"
@@ -651,7 +643,6 @@ def yolo_loop():
                         obstacle_detected = True
                     
                     elif dist_cm > 250 and total_area_ratio < 0.08:
-                        # Object is far and small — keep going
                         current_status = f"⬆️ {closest_name} far ({dist_cm}cm) — FORWARD"
                         send_esp32("forward")
                         obstacle_detected = False
@@ -659,19 +650,13 @@ def yolo_loop():
                         obstacle_creep_active = False
                     
                     else:
-                        # ── LAST RESORT: No gap, can't go around ──
-                        # Stop, then creep after timeout
                         obstacle_detected = True
-                        
                         if obstacle_stopped_since is None:
                             obstacle_stopped_since = time.time()
                         
                         stop_duration = time.time() - obstacle_stopped_since
-                        
                         if obstacle_creep_active:
-                            # Currently in creep phase
                             if time.time() - obstacle_creep_start > OBSTACLE_CREEP_DURATION:
-                                # Creep phase ended, back to waiting
                                 obstacle_creep_active = False
                                 obstacle_stopped_since = time.time()
                                 current_status = f"🛑 Re-checking {closest_name}..."
@@ -680,7 +665,6 @@ def yolo_loop():
                                 current_status = f"🐢 Creeping past {closest_name}..."
                                 send_esp32("slow")
                         elif stop_duration > OBSTACLE_STOP_TIMEOUT:
-                            # Waited long enough, try creeping
                             obstacle_creep_active = True
                             obstacle_creep_start = time.time()
                             current_status = f"🐢 Creeping past {closest_name}..."
@@ -692,11 +676,9 @@ def yolo_loop():
                             send_esp32("stop")
                 
                 else:
-                    # ─── PATH CLEAR — FOLLOW LANE OR GPS ───
                     obstacle_stopped_since = None
                     obstacle_creep_active = False
                     
-                    # SAFETY: Don't drive if we have no active mission
                     if active_phase in ["IDLE", "AWAITING_PACKING"]:
                         send_esp32("stop")
                         if active_phase == "IDLE":
@@ -705,7 +687,6 @@ def yolo_loop():
                             current_status = "📦 Waiting for shopkeeper to pack"
                         continue
                     
-                    # 1. Start with the Lane Follower
                     nav_cmd = lane_cmd
                     nav_msg = lane_msg
                     
