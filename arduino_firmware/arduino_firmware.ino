@@ -1,8 +1,8 @@
 #include <Servo.h>
 
-#define IN1 4
-#define IN2 7
-#define IN3 8
+#define IN1 7
+#define IN2 8
+#define IN3 11
 #define IN4 12
 
 #define ENA 5
@@ -12,18 +12,19 @@
 #define SPEED_SLOW   120
 #define SPEED_DRIFT  160
 
-#define CARGO_SERVO_PIN  9
-#define SCAN_SERVO_PIN   10
+#define CARGO_SERVO_PIN  10
+#define SCAN_SERVO_PIN   9
 
-#define TRIG_PIN  2
-#define ECHO_PIN  3
+#define TRIG_PIN  A0
+#define ECHO_PIN  A1
 #define MAX_DIST  400
 
-#define BUZZER_PIN 11
+#define BUZZER_PIN 2
 
 #define WATCHDOG_MS       1500
 #define DEADTIME_MS       50
 #define MIN_CMD_INTERVAL  30
+#define BLOCKED_LOCKOUT_MS 500
 
 #define SCAN_ANGLE_LEFT    45
 #define SCAN_ANGLE_CENTER  90
@@ -36,6 +37,7 @@ Servo scanServo;
 unsigned long lastCommandTime = 0;
 unsigned long lastMotorChange = 0;
 unsigned long lastDistSend = 0;
+unsigned long blockedUntil = 0;
 int currentDirection = 0;
 
 int currentScanAngle = SCAN_ANGLE_CENTER;
@@ -143,7 +145,10 @@ void processCommand(String cmd) {
   unsigned long now = millis();
   lastCommandTime = now;
   
+  bool isBlocked = (now < blockedUntil);
+  
   if (cmd == "forward") {
+    if (isBlocked) return;
     if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
       driveForward();
       lastMotorChange = now;
@@ -156,6 +161,7 @@ void processCommand(String cmd) {
     }
   }
   else if (cmd == "slow") {
+    if (isBlocked) return;
     if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
       driveForwardSlow();
       lastMotorChange = now;
@@ -279,6 +285,7 @@ void loop() {
     
     if (dist < 15 && dirTag == "C") {
       stopMotors();
+      blockedUntil = millis() + BLOCKED_LOCKOUT_MS;
       Serial.println("BLOCKED");
       beepWarning();
     } else if (dist < 100 && dirTag == "C") {

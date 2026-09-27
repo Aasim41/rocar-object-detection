@@ -82,17 +82,17 @@ autonomous-cart-main/
 
 | Component | Arduino Pin | Type | Notes |
 | :--- | :--- | :--- | :--- |
-| **IN1** | **Pin 4** | Digital Output | Left motor direction |
-| **IN2** | **Pin 7** | Digital Output | Left motor direction |
-| **IN3** | **Pin 8** | Digital Output | Right motor direction |
+| **IN1** | **Pin 7** | Digital Output | Left motor direction |
+| **IN2** | **Pin 8** | Digital Output | Left motor direction |
+| **IN3** | **Pin 11** | Digital Output | Right motor direction |
 | **IN4** | **Pin 12** | Digital Output | Right motor direction |
 | **ENA** | **Pin 5** | PWM Output | Left motor speed control |
 | **ENB** | **Pin 6** | PWM Output | Right motor speed control |
-| **Cargo Servo** | **Pin 9** | PWM Output | Delivery box lock (0°) / unlock (90°) |
-| **Scan Servo** | **Pin 10** | PWM Output | Ultrasonic sweep (45°, 90°, 135°) |
-| **HC-SR04 TRIG**| **Pin 2** | Digital Output | Distance trigger pulse |
-| **HC-SR04 ECHO**| **Pin 3** | Digital Input | Distance measurement pulse |
-| **Buzzer** | **Pin 11** | Digital Output | Proximity & obstacle warnings |
+| **Cargo Servo** | **Pin 10** | PWM Output | Delivery box lock (0°) / unlock (90°) |
+| **Scan Servo** | **Pin 9** | PWM Output | Ultrasonic sweep (45°, 90°, 135°) |
+| **HC-SR04 TRIG**| **Pin A0** | Digital Output | Distance trigger pulse |
+| **HC-SR04 ECHO**| **Pin A1** | Digital Input | Distance measurement pulse |
+| **Buzzer** | **Pin 2** | Digital Output | Proximity & obstacle warnings |
 
 ---
 

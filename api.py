@@ -14,13 +14,13 @@ import traceback
 from datetime import datetime
 from ultralytics import YOLO
 
-# --- Try to import websocket for ESP32 connection ---
+# --- Try to import websocket for bot hardware connection ---
 try:
     import websocket
     WS_AVAILABLE = True
 except ImportError:
     WS_AVAILABLE = False
-    print("⚠️  websocket-client not installed. ESP32 connection disabled.")
+    print("⚠️  websocket-client not installed. Bot hardware connection disabled.")
     print("   Install with: pip install websocket-client")
 
 from navigation.pipeline import fetch_routes
@@ -41,10 +41,10 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     add_log("🚀 Backend starting up...")
     
-    # Start the ESP32 sender queue worker
+    # Start the bot hardware sender queue worker
     threading.Thread(target=esp32_sender_worker, daemon=True).start()
     
-    # Try connecting to ESP32 / Arduino (and keep retrying automatically)
+    # Try connecting to Arduino via phone relay (and keep retrying automatically)
     threading.Thread(target=connect_esp32, daemon=True).start()
     threading.Thread(target=esp32_reconnect_worker, daemon=True).start()
     
@@ -56,9 +56,9 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=yolo_loop, daemon=True).start()
     add_log("🧠 YOLO loop started")
     
-    # Start ESP32 listener thread
+    # Start Arduino listener thread
     threading.Thread(target=esp32_listener, daemon=True).start()
-    add_log("👂 ESP32 listener thread started")
+    add_log("👂 Arduino listener thread started")
     
     # Start dashboard broadcast loop (async)
     asyncio.create_task(dashboard_broadcast_loop())
@@ -162,6 +162,7 @@ current_mode = "autonomous"  # "autonomous" or "manual"
 current_status = "INITIALIZING"
 latest_log = "System starting up..."
 obstacle_detected = False
+blocked_until = 0.0  # Time-based lockout: YOLO won't send forward/slow until this timestamp
 prev_area_ratio = 0.0  # Tracks object size growth between frames (fast approach detection)
 current_distance_cm = 999
 log_history = deque(maxlen=100)
@@ -261,7 +262,7 @@ def esp32_sender_worker():
         esp32_cmd_queue.task_done()
 
 def connect_esp32():
-    """Connect to ESP32 or Phone-Arduino WebSocket server."""
+    """Connect to Arduino via Phone-Relay WebSocket server."""
     global ws, ws_connected
     if not WS_AVAILABLE:
         return
@@ -287,7 +288,7 @@ def esp32_reconnect_worker():
         time.sleep(3.0)
 
 def send_esp32(cmd: str):
-    """Queue a command to ESP32 via WebSocket without blocking the AI loop."""
+    """Queue a command to Arduino via WebSocket without blocking the AI loop."""
     global ws_connected
     
     # Always log the command intent for the dashboard UI (avoid spam)
@@ -315,8 +316,8 @@ def send_esp32(cmd: str):
         pass # Drop command if queue is backed up (prevents memory leak)
 
 def esp32_listener():
-    """Background thread to listen for ESP32 messages."""
-    global obstacle_detected, current_distance_cm, current_status, battery_level, motor_current, robot_temperature
+    """Background thread to listen for Arduino messages via phone relay."""
+    global obstacle_detected, blocked_until, current_distance_cm, current_status, battery_level, motor_current, robot_temperature
     global dist_left_cm, dist_center_cm, dist_right_cm
     while True:
         if ws_connected and ws is not None:
@@ -325,8 +326,9 @@ def esp32_listener():
                 if msg:
                     if msg == "BLOCKED":
                         obstacle_detected = True
+                        blocked_until = time.time() + 1.5
                         current_status = "🚨 OBSTACLE BLOCKED"
-                        add_log("🚨 ESP32 REFLEX: Obstacle within 15cm!")
+                        add_log("🚨 Hardware Reflex: Obstacle within 15cm!")
                         ts = datetime.now().strftime("%H:%M:%S")
                         esp_commands.append(f"[{ts}] RECV: BLOCKED")
                         if len(esp_commands) > 30: esp_commands.pop(0)
@@ -757,20 +759,25 @@ def yolo_loop():
                     current_status = f"✅ PATH CLEAR → {nav_cmd.upper()}"
                     current_distance_cm = 999
                     
-                    # ── Scan Servo Reset ──
-                    target_scan_angle = "scan_center"
-                    if nav_cmd == "left": target_scan_angle = "scan_left"
-                    elif nav_cmd == "right": target_scan_angle = "scan_right"
-                    
-                    if scan_servo_angle != target_scan_angle:
-                        send_esp32(target_scan_angle)
-                        scan_servo_angle = target_scan_angle
-                    # ── Send the navigation command ──
-                    send_esp32(nav_cmd)
-                    # Keep continuous steer for Webots; send_esp32 may override for dodges/GPS turns
-                    if nav_cmd == "forward":
-                        last_webots_steer = lane_steer
-                    obstacle_detected = False
+                    # ── BLOCKED lockout: don't override Arduino's emergency stop ──
+                    if time.time() < blocked_until and nav_cmd in ("forward", "slow"):
+                        send_esp32("stop")
+                        current_status = "🚨 BLOCKED LOCKOUT — waiting for clearance"
+                    else:
+                        # ── Scan Servo Reset ──
+                        target_scan_angle = "scan_center"
+                        if nav_cmd == "left": target_scan_angle = "scan_left"
+                        elif nav_cmd == "right": target_scan_angle = "scan_right"
+                        
+                        if scan_servo_angle != target_scan_angle:
+                            send_esp32(target_scan_angle)
+                            scan_servo_angle = target_scan_angle
+                        # ── Send the navigation command ──
+                        send_esp32(nav_cmd)
+                        # Keep continuous steer for Webots
+                        if nav_cmd == "forward":
+                            last_webots_steer = lane_steer
+                        obstacle_detected = False
             
             time.sleep(0.03)
         except Exception as e:
@@ -879,10 +886,19 @@ async def get_status():
 @app.post("/set_mode")
 async def set_mode(req: ModeRequest):
     """Toggle between autonomous and manual mode."""
-    global current_mode, current_status
+    global current_mode, current_status, obstacle_detected, obstacle_stopped_since, obstacle_creep_active
     current_mode = req.mode
     if current_mode == "manual":
+        # Flush any queued autonomous commands to prevent leakage
+        while not esp32_cmd_queue.empty():
+            try:
+                esp32_cmd_queue.get_nowait()
+            except queue.Empty:
+                break
         send_esp32("stop")
+        obstacle_detected = False
+        obstacle_stopped_since = None
+        obstacle_creep_active = False
         current_status = "🎮 MANUAL OVERRIDE"
         add_log("🚨 Manual Override Activated")
     else:

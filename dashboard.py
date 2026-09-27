@@ -510,7 +510,7 @@ st.markdown(f"""
     <div class="topbar-right">
         <div class="conn-group">
             {conn_pill("BACKEND", backend_online)}
-            {conn_pill("ESP32", s.get("esp32_connected", False))}
+            {conn_pill("ARDUINO", s.get("esp32_connected", False))}
             {conn_pill("CAMERA", s.get("camera_active", False))}
             {conn_pill("GPS APP", s.get("gps_app_connected", False))}
             {conn_pill("TRACKING", s.get("tracking_clients", 0) > 0)}
