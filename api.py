@@ -967,20 +967,28 @@ async def new_delivery(request: Request):
     # Use pickup as charging/base station for now
     charging_station = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
     
-    # Calculate route to sender
-    # Use live_location as start if available, else use charging_station as fallback
+    # Calculate route to sender and dropoff
     start_lat = live_location["lat"] if live_location else charging_station["lat"]
     start_lng = live_location["lng"] if live_location else charging_station["lng"]
     kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
     market_obj = Coordinates(latitude=source_location["lat"], longitude=source_location["lng"])
+    del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
     
-    # We just need the route to the sender.
-    routes = fetch_routes(kart_obj, market_obj, market_obj) 
-    current_route = routes.get('receive_points', [])
+    routes = fetch_routes(kart_obj, market_obj, del_obj) 
+    receive_pts = routes.get('receive_points', [])
+    deliver_pts = routes.get('deliver_points', [])
+    
+    dist_to_pickup = calculate_distance((start_lat, start_lng), (source_location["lat"], source_location["lng"]))
+    if dist_to_pickup < 10.0 or not receive_pts:
+        current_route = deliver_pts if deliver_pts else receive_pts
+        active_phase = "AWAITING_LOAD"
+        add_log(f"📍 New Delivery: Cart at pickup. Delivery route points: {len(current_route)}")
+    else:
+        current_route = receive_pts
+        active_phase = "HEADING_TO_SENDER"
+        add_log(f"📍 New Delivery: Heading to sender. Route points: {len(current_route)}")
+
     waypoint_index = 0
-    active_phase = "HEADING_TO_SENDER"
-    
-    add_log(f"📍 New Delivery: Heading to sender. Route points: {len(current_route)}")
     return {"status": "ok", "delivery_id": current_delivery_id, "phase": active_phase}
 
 @app.post("/backend/verify_qr")

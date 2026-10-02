@@ -18,7 +18,7 @@ def get_google_route(origin, destination):
     data = {
         "origin": coordinates_to_location(origin),
         "destination": coordinates_to_location(destination),
-        "travelMode": "DRIVE"
+        "travelMode": "WALK"
     }
     headers = {
         "Content-Type": "application/json",

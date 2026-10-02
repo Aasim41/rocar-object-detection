@@ -30,6 +30,7 @@ class LaneFollower:
         self.color_thresh = 35
 
         self.road_color_ema = None
+        self.road_color_history = deque(maxlen=20)
         self.color_ema_alpha = 1.0
 
         self.shadow_L_weight = 0.25
