@@ -54,21 +54,15 @@ def polypoint(current_coords, points):
 # Instead of always finding the closest point (which can go backward),
 # this advances through the route waypoints sequentially.
 
-WAYPOINT_REACHED_RADIUS = 10.0  # meters — wider to handle GPS ±3-5m jitter
-WAYPOINT_LOOKAHEAD = 3           # skip ahead for smoother curves
+WAYPOINT_REACHED_RADIUS = 5.0    # meters — tightened up slightly since we simplified the route
+WAYPOINT_LOOKAHEAD_DIST = 4.0    # physical meters to look ahead for smooth steering
 
 def get_next_waypoint(current_coords, points, current_index):
     """
     Given the cart's current GPS position, the full route, and the current
-    waypoint index, determine the target waypoint to steer toward.
+    waypoint index, determine the target waypoint to steer toward using Pure Pursuit logic.
     
     Returns (target_point_tuple, updated_index).
-    
-    Logic:
-      1. If we're within WAYPOINT_REACHED_RADIUS of the current target, advance.
-      2. Keep advancing past any waypoints we've already overshot.
-      3. Apply a small lookahead for smoother cornering.
-      4. Never go backward.
     """
     if not points or current_index >= len(points):
         return None, current_index
@@ -76,21 +70,32 @@ def get_next_waypoint(current_coords, points, current_index):
     current = to_tuple(current_coords)
     idx = current_index
 
-    # Advance past any waypoints we've already reached or overshot
-    while idx < len(points):
+    # 1. Advance past any waypoints we've already reached
+    while idx < len(points) - 1:
         wp = to_tuple(points[idx])
         dist = calculate_distance(current, wp)
         if dist < WAYPOINT_REACHED_RADIUS:
-            idx += 1  # We reached this one, move to the next
+            idx += 1
         else:
-            break  # This waypoint is still ahead of us
+            break
 
-    # Apply lookahead for smoother steering (aim a bit further ahead on curves)
-    target_idx = min(idx + WAYPOINT_LOOKAHEAD, len(points) - 1)
+    # If we reached the final waypoint
+    if idx >= len(points) - 1:
+        dist_to_final = calculate_distance(current, to_tuple(points[-1]))
+        if dist_to_final < WAYPOINT_REACHED_RADIUS:
+            return None, len(points)
+        return to_tuple(points[-1]), idx
 
-    # If we've passed ALL waypoints, we've reached the end
-    if idx >= len(points):
-        return None, idx
+    # 2. Pure Pursuit Lookahead: find a point further along the path that is at least
+    # WAYPOINT_LOOKAHEAD_DIST meters away from the *current* waypoint.
+    target_idx = idx
+    current_wp = to_tuple(points[idx])
+    
+    while target_idx < len(points) - 1:
+        lookahead_wp = to_tuple(points[target_idx])
+        if calculate_distance(current_wp, lookahead_wp) >= WAYPOINT_LOOKAHEAD_DIST:
+            break
+        target_idx += 1
 
     target = to_tuple(points[target_idx])
     return target, idx

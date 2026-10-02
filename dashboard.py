@@ -798,10 +798,10 @@ with col_right:
     <body style="margin:0; padding:0; background:#0a0f1a;">
         <div id="map"></div>
         <script>
-            let map, botMarker, sourceMarker, destMarker;
+            let map, botMarker, sourceMarker, destMarker, routePoly;
             
             async function initMap() {{
-                const {{ Map }} = await google.maps.importLibrary("maps");
+                const {{ Map, Polyline }} = await google.maps.importLibrary("maps");
                 const {{ AdvancedMarkerElement, PinElement }} = await google.maps.importLibrary("marker");
                 
                 map = new Map(document.getElementById("map"), {{
@@ -812,65 +812,96 @@ with col_right:
                     disableDefaultUI: true,
                 }});
 
-                const botPin = new PinElement({{ background: "#3b82f6", borderColor: "#1d4ed8", glyphColor: "white" }});
-                const srcPin = new PinElement({{ background: "#22c55e", borderColor: "#166534", glyphColor: "white" }});
-                const dstPin = new PinElement({{ background: "#ef4444", borderColor: "#991b1b", glyphColor: "white" }});
+                const srcPin = new PinElement({{ background: "#ffffff", borderColor: "#27272a", glyphColor: "transparent" }});
+                const dstPin = new PinElement({{ background: "#f59e0b", borderColor: "#27272a", glyphColor: "transparent" }});
 
-                botMarker = new AdvancedMarkerElement({{ map: map, content: botPin.element, title: "Delivery Cart" }});
+                botMarker = new google.maps.Marker({{ 
+                    map: map, 
+                    icon: {{
+                        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                        scale: 6,
+                        fillColor: '#22c55e',
+                        fillOpacity: 1,
+                        strokeColor: '#09090b',
+                        strokeWeight: 2,
+                        rotation: 0,
+                    }},
+                    zIndex: 100
+                }});
                 sourceMarker = new AdvancedMarkerElement({{ map: map, content: srcPin.element, title: "Source" }});
                 destMarker = new AdvancedMarkerElement({{ map: map, content: dstPin.element, title: "Destination" }});
                 
-                pollBackend();
+                routePoly = new google.maps.Polyline({{
+                    geodesic: true,
+                    strokeColor: '#3b82f6',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 4,
+                    map: map,
+                }});
+                
+                connectWebSocket();
             }}
             
-            async function pollBackend() {{
-                try {{
-                    const res = await fetch("{BACKEND_URL}/status");
-                    const data = await res.json();
-                    
-                    if(data.map_data) {{
+            function connectWebSocket() {{
+                const wsUrl = "{BACKEND_URL}".replace(/^http/, 'ws') + "/ws/track";
+                const ws = new WebSocket(wsUrl);
+                
+                ws.onmessage = (event) => {{
+                    try {{
+                        const data = JSON.parse(event.data);
+                        if (data.type !== 'location_update') return;
+                        
                         const bounds = new google.maps.LatLngBounds();
                         let hasBounds = false;
                         
-                        if(data.map_data.live_location) {{
-                            botMarker.position = data.map_data.live_location;
-                            botMarker.map = map;
-                            bounds.extend(data.map_data.live_location);
+                        if (data.cart) {{
+                            const curr = botMarker.getPosition();
+                            if (curr) {{
+                                const dLng = data.cart.lng - curr.lng();
+                                const dLat = data.cart.lat - curr.lat();
+                                const heading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
+                                const icon = botMarker.getIcon();
+                                icon.rotation = heading;
+                                botMarker.setIcon(icon);
+                            }}
+                            botMarker.setPosition(data.cart);
+                            bounds.extend(data.cart);
                             hasBounds = true;
-                        }} else {{
-                            botMarker.map = null;
                         }}
                         
-                        if(data.map_data.source) {{
-                            sourceMarker.position = data.map_data.source;
+                        if (data.source) {{
+                            sourceMarker.position = data.source;
                             sourceMarker.map = map;
-                            bounds.extend(data.map_data.source);
+                            bounds.extend(data.source);
                             hasBounds = true;
                         }} else {{
                             sourceMarker.map = null;
                         }}
                         
-                        if(data.map_data.destination) {{
-                            destMarker.position = data.map_data.destination;
+                        if (data.destination) {{
+                            destMarker.position = data.destination;
                             destMarker.map = map;
-                            bounds.extend(data.map_data.destination);
+                            bounds.extend(data.destination);
                             hasBounds = true;
                         }} else {{
                             destMarker.map = null;
                         }}
                         
-                        // Fit map to show all markers (zoomed out as requested)
-                        if(hasBounds) {{
-                            map.fitBounds(bounds);
-                            // Don't zoom in too close if there's only one point
-                            if(map.getZoom() > 18) map.setZoom(18);
+                        if (data.route_points) {{
+                            routePoly.setPath(data.route_points);
+                        }} else {{
+                            routePoly.setPath([]);
                         }}
-                    }}
-                }} catch(e) {{
-                    console.error("Failed to fetch map data");
-                }}
+                        
+                        if (hasBounds && !window.hasFittedBounds) {{
+                            map.fitBounds(bounds);
+                            if(map.getZoom() > 18) map.setZoom(18);
+                            window.hasFittedBounds = true;
+                        }}
+                    }} catch(e) {{ console.error(e); }}
+                }};
                 
-                setTimeout(pollBackend, 2000);
+                ws.onclose = () => setTimeout(connectWebSocket, 2000);
             }}
             
             initMap();

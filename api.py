@@ -155,8 +155,10 @@ current_heading = 0.0
 current_route = []
 waypoint_index = 0  # Tracks which waypoint the cart is currently heading toward
 stored_deliver_points = []
-active_phase = "IDLE"  # IDLE, PICKUP, AWAITING_PACKING, DELIVERY, RETURNING
+active_phase = "IDLE"  # IDLE, HEADING_TO_SENDER, AWAITING_LOAD, DELIVERING, AWAITING_RETRIEVAL, STANDBY, RETURNING_TO_BASE
 cargo_state = "LOCKED"  # LOCKED on boot (matches firmware servo at 0°)
+charging_station = {"lat": 0.0, "lng": 0.0}  # Set via API
+current_delivery_id = None
 shop_return_location = None  # Saved shop location for return trip
 current_mode = "autonomous"  # "autonomous" or "manual"
 current_status = "INITIALIZING"
@@ -243,7 +245,7 @@ import queue
 ws = None
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
-BOT_WS_URL = os.environ.get("BOT_WS_URL", "ws://192.168.4.1:81/")
+BOT_WS_URL = os.environ.get("BOT_WS_URL", "ws://192.168.4.1:8765/")
 
 def esp32_sender_worker():
     """Background thread that consumes the command queue and sends to bot."""
@@ -681,76 +683,78 @@ def yolo_loop():
                     obstacle_stopped_since = None
                     obstacle_creep_active = False
                     
-                    if active_phase in ["IDLE", "AWAITING_PACKING"]:
+                    if active_phase in ["IDLE", "AWAITING_LOAD", "AWAITING_RETRIEVAL", "STANDBY"]:
                         send_esp32("stop")
                         if active_phase == "IDLE":
                             current_status = "⏸️ IDLE — Waiting for order"
-                        else:
-                            current_status = "📦 Waiting for shopkeeper to pack"
+                        elif active_phase == "AWAITING_LOAD":
+                            current_status = "📦 Waiting for sender to load"
+                        elif active_phase == "AWAITING_RETRIEVAL":
+                            current_status = "🎯 Waiting for receiver to retrieve"
+                        elif active_phase == "STANDBY":
+                            current_status = "⏱️ STANDBY — Waiting for next order"
                         continue
                     
                     nav_cmd = lane_cmd
                     nav_msg = lane_msg
                     
                     # 2. Check if GPS demands a specific intersection turn
-                    if current_route and live_location and (destination_location or source_location):
+                    if current_route and live_location:
                         try:
                             from navigation.fnpp import calculate_distance, to_tuple
                             
-                            target_loc = source_location if active_phase == "PICKUP" and source_location else destination_location
-                            if not target_loc:
+                            target_loc = None
+                            if active_phase == "HEADING_TO_SENDER":
+                                target_loc = source_location
+                            elif active_phase == "DELIVERING":
                                 target_loc = destination_location
+                            elif active_phase == "RETURNING_TO_BASE":
+                                target_loc = charging_station
                                 
-                            dist_to_dest = calculate_distance(to_tuple(live_location), to_tuple(target_loc))
-                            
-                            if dist_to_dest < 5.0:  # Within 5 meters
-                                nav_cmd = "stop"
-                                send_esp32("stop")
+                            if target_loc:
+                                dist_to_dest = calculate_distance(to_tuple(live_location), to_tuple(target_loc))
                                 
-                                if active_phase == "PICKUP":
-                                    nav_msg = "🏪 AT SHOP → WAITING FOR PACKING"
-                                    current_status = nav_msg
-                                    send_esp32("unlock")
-                                    cargo_state = "OPEN"
-                                    active_phase = "AWAITING_PACKING"
-                                    shop_return_location = source_location.copy() if source_location else None
-                                    current_route = []
-                                    waypoint_index = 0
-                                elif active_phase == "DELIVERY":
-                                    nav_msg = "🎯 DESTINATION REACHED → WAITING FOR OTP"
-                                    current_status = nav_msg
-                                    active_phase = "IDLE"
-                                    current_route = []
-                                    waypoint_index = 0
-                                    destination_location = None
-                                elif active_phase == "RETURNING":
-                                    nav_msg = "🏠 RETURNED TO SHOP → IDLE"
-                                    current_status = nav_msg
-                                    add_log("✅ Cart has returned to the shop!")
-                                    active_phase = "IDLE"
-                                    current_route = []
-                                    waypoint_index = 0
-                                    source_location = None
-                                    destination_location = None
-                                    shop_return_location = None
-                            else:
-                                nav_result = navigate(current_heading, live_location, current_route, waypoint_index)
-                                gps_cmd = nav_result.get("command", "F")
-                                waypoint_index = nav_result.get("waypoint_index", waypoint_index)
-                                
-                                wp_total = len(current_route)
-                                if waypoint_index < wp_total:
-                                    wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
-                                    nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
-                                
-                                cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
-                                gps_cmd = cmd_map.get(gps_cmd, "forward")
-                                
-                                # At intersections, GPS ALWAYS overrides lane following
-                                if lane_follower.is_intersection or gps_cmd != "forward":
-                                    nav_cmd = gps_cmd
-                                    junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
-                                    nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
+                                if dist_to_dest < 5.0:  # Within 5 meters
+                                    nav_cmd = "stop"
+                                    send_esp32("stop")
+                                    
+                                    if active_phase == "HEADING_TO_SENDER":
+                                        nav_msg = "🏪 AT SENDER → WAITING FOR LOAD"
+                                        current_status = nav_msg
+                                        active_phase = "AWAITING_LOAD"
+                                        current_route = []
+                                        waypoint_index = 0
+                                    elif active_phase == "DELIVERING":
+                                        nav_msg = "🎯 DESTINATION REACHED → WAITING FOR RETRIEVAL"
+                                        current_status = nav_msg
+                                        active_phase = "AWAITING_RETRIEVAL"
+                                        current_route = []
+                                        waypoint_index = 0
+                                    elif active_phase == "RETURNING_TO_BASE":
+                                        nav_msg = "🏠 RETURNED TO BASE → IDLE"
+                                        current_status = nav_msg
+                                        add_log("✅ Cart has returned to base!")
+                                        active_phase = "IDLE"
+                                        current_route = []
+                                        waypoint_index = 0
+                                else:
+                                    nav_result = navigate(current_heading, live_location, current_route, waypoint_index)
+                                    gps_cmd = nav_result.get("command", "F")
+                                    waypoint_index = nav_result.get("waypoint_index", waypoint_index)
+                                    
+                                    wp_total = len(current_route)
+                                    if waypoint_index < wp_total:
+                                        wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
+                                        nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
+                                    
+                                    cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
+                                    gps_cmd = cmd_map.get(gps_cmd, "forward")
+                                    
+                                    # At intersections, GPS ALWAYS overrides lane following
+                                    if lane_follower.is_intersection or gps_cmd != "forward":
+                                        nav_cmd = gps_cmd
+                                        junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
+                                        nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
@@ -860,6 +864,7 @@ async def get_status():
         "status": current_status,
         "mode": current_mode,
         "active_phase": active_phase,
+        "current_delivery_id": current_delivery_id,
         "battery_level": battery_level,
         "motor_current": motor_current,
         "robot_temperature": robot_temperature,
@@ -940,6 +945,107 @@ async def set_routing(req: Request):
     except Exception as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
+@app.post("/backend/set_charging_station")
+async def set_charging_station(request: Request):
+    global charging_station
+    body = await request.json()
+    charging_station = {"lat": body["lat"], "lng": body["lng"]}
+    return {"status": "ok", "charging_station": charging_station}
+
+@app.post("/backend/new_delivery")
+async def new_delivery(request: Request):
+    global active_phase, source_location, destination_location, current_delivery_id, current_route, waypoint_index, charging_station
+    body = await request.json()
+    
+    pickup = body.get("pickup", {})
+    dropoff = body.get("dropoff", {})
+    current_delivery_id = body.get("delivery_id", "")
+    
+    source_location = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
+    destination_location = {"lat": dropoff.get("lat", 0), "lng": dropoff.get("lng", 0)}
+    
+    # Use pickup as charging/base station for now
+    charging_station = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
+    
+    # Calculate route to sender
+    # Use live_location as start if available, else use charging_station as fallback
+    start_lat = live_location["lat"] if live_location else charging_station["lat"]
+    start_lng = live_location["lng"] if live_location else charging_station["lng"]
+    kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+    market_obj = Coordinates(latitude=source_location["lat"], longitude=source_location["lng"])
+    
+    # We just need the route to the sender.
+    routes = fetch_routes(kart_obj, market_obj, market_obj) 
+    current_route = routes.get('receive_points', [])
+    waypoint_index = 0
+    active_phase = "HEADING_TO_SENDER"
+    
+    add_log(f"📍 New Delivery: Heading to sender. Route points: {len(current_route)}")
+    return {"status": "ok", "delivery_id": current_delivery_id, "phase": active_phase}
+
+@app.post("/backend/verify_qr")
+async def verify_qr(request: Request):
+    global active_phase, cargo_state
+    body = await request.json()
+    cart_qr = body.get("cart_id", "")
+    action = body.get("action", "")  # "load" or "retrieve"
+    
+    if action == "load" and active_phase == "AWAITING_LOAD":
+        cargo_state = "UNLOCKED"
+        await send_esp32("unlock")
+        return {"status": "unlocked", "message": "Cart unlocked for loading"}
+    elif action == "retrieve" and active_phase == "AWAITING_RETRIEVAL":
+        cargo_state = "UNLOCKED"
+        await send_esp32("unlock")
+        return {"status": "unlocked", "message": "Cart unlocked for retrieval"}
+    else:
+        return {"status": "error", "message": f"Invalid action for phase {active_phase}"}
+
+@app.post("/backend/dispatch")
+async def dispatch_cart(request: Request):
+    global active_phase, cargo_state, current_route, waypoint_index
+    cargo_state = "LOCKED"
+    await send_esp32("lock")
+    
+    # Calculate route to destination
+    start_lat = live_location["lat"] if live_location else source_location["lat"]
+    start_lng = live_location["lng"] if live_location else source_location["lng"]
+    kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+    del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
+    
+    routes = fetch_routes(kart_obj, del_obj, del_obj)
+    current_route = routes.get('receive_points', [])
+    waypoint_index = 0
+    
+    active_phase = "DELIVERING"
+    add_log(f"📍 Dispatched! Heading to destination. Route points: {len(current_route)}")
+    return {"status": "dispatched", "phase": active_phase}
+
+@app.post("/backend/complete_retrieval")
+async def complete_retrieval(request: Request):
+    global active_phase, cargo_state
+    cargo_state = "LOCKED"
+    await send_esp32("lock")
+    active_phase = "STANDBY"
+    asyncio.create_task(standby_timer())
+    return {"status": "standby", "message": "3-minute standby started"}
+
+async def standby_timer():
+    global active_phase, current_route, waypoint_index
+    await asyncio.sleep(180)  # 3 minutes
+    if active_phase == "STANDBY":
+        active_phase = "RETURNING_TO_BASE"
+        # Fetch route to charging station
+        start_lat = live_location["lat"] if live_location else destination_location["lat"]
+        start_lng = live_location["lng"] if live_location else destination_location["lng"]
+        kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+        base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
+        
+        routes = fetch_routes(kart_obj, base_obj, base_obj)
+        current_route = routes.get('receive_points', [])
+        waypoint_index = 0
+        add_log(f"⏰ Standby timeout. Returning to base. Route points: {len(current_route)}")
+
 @app.post("/backend/coordinates/destinations")
 async def get_coordinates(req: Request):
     """Calculate GPS routes (called once when a new delivery order comes in)."""
@@ -968,8 +1074,9 @@ async def get_coordinates(req: Request):
     
     current_route = routes.get('receive_points', [])
     stored_deliver_points = routes.get('deliver_points', [])
-    active_phase = "PICKUP"
+    active_phase = "AWAITING_PACKING"
     waypoint_index = 0
+    shop_return_location = source_location
     
     add_log(f"📍 Routes calculated: {len(current_route)} pickup waypoints, {len(stored_deliver_points)} delivery waypoints")
     return routes
@@ -1027,50 +1134,57 @@ async def update_live_location(req: Request):
 @app.post("/backend/unlock")
 async def unlock_cart(req: Request):
     """Triggered when the user enters the OTP. After unlocking, cart returns to shop."""
-    global current_status, current_route, active_phase, cargo_state, source_location, destination_location, waypoint_index, shop_return_location
+    global current_status, active_phase, cargo_state
+    
     send_esp32("unlock")
     with state_lock:
         cargo_state = "OPEN"
         current_status = "🔓 CARGO UNLOCKED → Customer collecting order..."
-        active_phase = "IDLE"
+        # Keep active_phase as DELIVERY so no new orders are accepted yet
     add_log("🔓 Customer unlocked cargo. Waiting 30s for collection...")
     
-    # Wait for customer to collect the order, then lock and return
-    await asyncio.sleep(30)
-    
-    send_esp32("lock")
-    with state_lock:
-        cargo_state = "LOCKED"
-    add_log("🔒 Cargo locked. Preparing return route to shop...")
-    
-    # Build return route
-    if shop_return_location and live_location:
-        try:
-            from navigation.pipeline import fetch_routes
-            kart_obj = KartCoordinates(latitude=live_location["lat"], longitude=live_location["lng"], heading=current_heading)
-            shop_obj = Coordinates(latitude=shop_return_location["lat"], longitude=shop_return_location["lng"])
-            
-            # Reuse fetch_routes but just for the return leg
-            return_routes = fetch_routes(kart_obj, shop_obj, shop_obj)
-            return_points = return_routes.get("receive_points", [])
-            
-            with state_lock:
-                current_route = return_points
-                waypoint_index = 0
-                destination_location = shop_return_location
-                source_location = None
-                active_phase = "RETURNING"
-                current_status = f"🏠 RETURNING TO SHOP ({len(return_points)} waypoints)"
-            add_log(f"🏠 Return route calculated: {len(return_points)} waypoints back to shop")
-        except Exception as e:
-            add_log(f"⚠️ Could not calculate return route: {e}")
+    async def return_to_shop_task():
+        global current_status, current_route, active_phase, cargo_state, source_location, destination_location, waypoint_index
+        
+        # Wait for customer to collect the order, then lock and return
+        await asyncio.sleep(30)
+        
+        send_esp32("lock")
+        with state_lock:
+            cargo_state = "LOCKED"
+        add_log("🔒 Cargo locked. Preparing return route to shop...")
+        
+        # Build return route
+        if shop_return_location and live_location:
+            try:
+                from navigation.pipeline import fetch_routes
+                kart_obj = KartCoordinates(latitude=live_location["lat"], longitude=live_location["lng"], heading=current_heading)
+                shop_obj = Coordinates(latitude=shop_return_location["lat"], longitude=shop_return_location["lng"])
+                
+                # Reuse fetch_routes but just for the return leg
+                return_routes = fetch_routes(kart_obj, shop_obj, shop_obj)
+                return_points = return_routes.get("receive_points", [])
+                
+                with state_lock:
+                    current_route = return_points
+                    waypoint_index = 0
+                    destination_location = shop_return_location
+                    source_location = None
+                    active_phase = "RETURNING"
+                    current_status = f"🏠 RETURNING TO SHOP ({len(return_points)} waypoints)"
+                add_log(f"🏠 Return route calculated: {len(return_points)} waypoints back to shop")
+            except Exception as e:
+                add_log(f"⚠️ Could not calculate return route: {e}")
+                with state_lock:
+                    active_phase = "IDLE"
+                    current_status = "⏸️ IDLE — Return route failed"
+        else:
+            add_log("⚠️ No shop location saved — cannot return")
             with state_lock:
                 active_phase = "IDLE"
-                current_status = "⏸️ IDLE — Return route failed"
-    else:
-        add_log("⚠️ No shop location saved — cannot return")
-        with state_lock:
-            active_phase = "IDLE"
+
+    # Start the return task in the background so the HTTP request completes instantly
+    asyncio.create_task(return_to_shop_task())
     
     return {"status": "success", "message": "Unlocked and returning to shop"}
 
@@ -1123,16 +1237,35 @@ async def broadcast_to_tracking():
     if not tracking_clients:
         return
     
-    # Calculate ETA
+    # Calculate accurate Path Distance ETA
     eta_seconds = None
-    if live_location and destination_location and gps_speed > 0.5:
+    if live_location and destination_location:
         try:
-            dist = calculate_distance(
-                to_tuple(live_location),
-                to_tuple(destination_location)
-            )
-            eta_seconds = int(dist / (gps_speed / 3.6))  # speed is km/h, convert to m/s
-        except Exception:
+            # 1. Calculate true remaining path distance instead of straight line
+            total_dist_meters = 0.0
+            if current_route and waypoint_index < len(current_route):
+                # Distance from current loc to the next waypoint
+                curr = to_tuple(live_location)
+                for i in range(waypoint_index, len(current_route)):
+                    nxt = to_tuple(current_route[i])
+                    total_dist_meters += calculate_distance(curr, nxt)
+                    curr = nxt
+                # Add final leg from last waypoint to destination
+                total_dist_meters += calculate_distance(curr, to_tuple(destination_location))
+            else:
+                # Fallback to straight line if no route
+                total_dist_meters = calculate_distance(
+                    to_tuple(live_location),
+                    to_tuple(destination_location)
+                )
+
+            # 2. Prevent wild ETA swings by using a smoothed speed or average walking speed fallback (3.0 km/h)
+            effective_speed_kmh = gps_speed if gps_speed > 0.5 else 3.0
+            
+            # 3. Time = Distance / Speed
+            eta_seconds = int(total_dist_meters / (effective_speed_kmh / 3.6))
+        except Exception as e:
+            add_log(f"ETA Calc Error: {str(e)}")
             pass
     
     data = {
@@ -1144,6 +1277,7 @@ async def broadcast_to_tracking():
         "cargo_state": cargo_state,
         "speed": gps_speed,
         "eta_seconds": eta_seconds,
+        "delivery_id": current_delivery_id,
         "route_points": [{"lat": p["latitude"], "lng": p["longitude"]} for p in current_route] if current_route else []
     }
     msg = json.dumps(data)
@@ -1182,7 +1316,12 @@ async def ws_gps(websocket: WebSocket):
             accuracy = data.get("accuracy", 0) or 0
             speed = data.get("speed", 0) or 0
             
-            gps_speed = speed
+            # Apply EMA smoothing to speed (alpha = 0.3)
+            if gps_speed == 0:
+                gps_speed = speed
+            else:
+                gps_speed = (0.3 * speed) + (0.7 * gps_speed)
+                
             gps_accuracy = accuracy
             
             # ── Accuracy gate: reject bad GPS readings ──
@@ -1315,12 +1454,18 @@ async def ws_track(websocket: WebSocket):
                 source_location = {"lat": src.get("lat", 0), "lng": src.get("lng", 0)}
                 destination_location = {"lat": dst.get("lat", 0), "lng": dst.get("lng", 0)}
                 
-                # Convert route_points to the format the navigation system expects
+                # Since the cart is always at the shop initially, we skip PICKUP
+                # and go straight to AWAITING_PACKING (waiting for shopkeeper to load).
                 current_route = [{"latitude": p["lat"], "longitude": p["lng"]} for p in route_points]
                 stored_deliver_points = current_route.copy()
                 waypoint_index = 0
-                active_phase = "PICKUP"
-                current_status = "📍 NEW ORDER → Navigating to shop"
+                active_phase = "AWAITING_PACKING"
+                shop_return_location = source_location
+                current_status = "📍 NEW ORDER → Waiting for shopkeeper to pack"
+                
+                # We open the cargo lock so the shopkeeper can load it
+                send_esp32("unlock")
+                cargo_state = "OPEN"
                 
                 add_log(f"📦 New order received via delivery app: {len(route_points)} waypoints")
                 
