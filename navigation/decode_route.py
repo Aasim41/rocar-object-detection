@@ -48,10 +48,17 @@ def extract_route_points(route_response):
     if not routes:
         return []
     route = routes[0]
+    
+    # Classic Directions API: overview_polyline.points
+    overview = route.get("overview_polyline")
+    if overview and isinstance(overview, dict) and overview.get("points"):
+        return decode_polyline(overview["points"])
+
+    # New Routes API: polyline.encodedPolyline
     polyline = route.get("polyline")
-    if not polyline:
-        return []
-    encoded = polyline.get("encodedPolyline")
-    if not encoded:
-        return []
-    return decode_polyline(encoded)
+    if polyline and isinstance(polyline, dict):
+        encoded = polyline.get("encodedPolyline")
+        if encoded:
+            return decode_polyline(encoded)
+            
+    return []
