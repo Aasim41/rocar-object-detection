@@ -25,9 +25,5 @@ COPY . .
 # Expose standard port
 EXPOSE 8000
 
-# Healthcheck to ensure FastAPI is responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/status || exit 1
-
-# Start uvicorn dynamically binding to $PORT (set by Railway/Render/Cloud)
-CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start the FastAPI server (reads $PORT dynamically)
+CMD ["python", "api.py"]

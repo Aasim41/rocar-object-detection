@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Autonomous Cart Backend", version="2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8501", "http://127.0.0.1:5173", "http://127.0.0.1:8501"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -226,11 +226,18 @@ if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
 
 use_url = isinstance(CAMERA_SOURCE, str)
-if not use_url:
-    cap = cv2.VideoCapture(CAMERA_SOURCE)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-else:
-    cap = None
+cap = None
+try:
+    if not use_url:
+        temp_cap = cv2.VideoCapture(CAMERA_SOURCE)
+        if temp_cap and temp_cap.isOpened():
+            cap = temp_cap
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        else:
+            print("📷 No local webcam detected — running in headless cloud mode.")
+except Exception as e:
+    print(f"📷 Camera init notice: {e}")
+
 latest_frame = None
 annotated_frame = None
 annotated_jpeg = None  # Pre-compressed JPEG buffer for zero-latency streaming
@@ -429,7 +436,7 @@ def camera_loop():
             time.sleep(1.0)
         else:
             # ── Local USB / laptop webcam ──
-            if cap.isOpened():
+            if cap is not None and cap.isOpened():
                 ret = cap.grab()
                 if ret:
                     _, frame = cap.retrieve()
@@ -438,6 +445,8 @@ def camera_loop():
                             frame = cv2.resize(frame, (640, 480))
                         with frame_lock:
                             latest_frame = frame
+            else:
+                time.sleep(1.0)
             time.sleep(0.01)
 
 # ============================================================
