@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: rocar-backend
+    env: docker
+    plan: starter
+    region: oregon
+    healthCheckPath: /status
+    envVars:
+      - key: PORT
+        value: 8000
