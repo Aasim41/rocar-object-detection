@@ -12,3 +12,10 @@ venv/
 
 .vscode/
 .idea/
+.env
+.env.*
+*.env*
+.env.local
+*.local
+node_modules
+__pycache__
