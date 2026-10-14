@@ -930,7 +930,7 @@ async def manual_control(req: ControlRequest):
         )
     
     cmd = req.action.lower()
-    if cmd in ["forward", "backward", "reverse", "left", "right", "stop", "lock", "unlock"]:
+    if cmd in ["forward", "backward", "reverse", "left", "right", "stop", "lock", "unlock", "beep"]:
         send_esp32(cmd)
         if cmd == "lock":
             cargo_state = "LOCKED"
@@ -939,6 +939,33 @@ async def manual_control(req: ControlRequest):
         add_log(f"Manual override: {cmd.upper()}")
         return {"status": "success", "command": cmd}
     return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid command"})
+
+@app.post("/backend/beep")
+async def trigger_beep():
+    send_esp32("beep")
+    add_log("🔔 Cart Bell / Piezo Buzzer Sounded")
+    return {"status": "success", "message": "beep sent"}
+
+@app.post("/backend/return_to_base")
+async def trigger_return_to_base():
+    global active_phase, current_route, waypoint_index
+    active_phase = "RETURNING_TO_BASE"
+    start_lat = live_location["lat"] if live_location else (destination_location.get("lat") or 0.0)
+    start_lng = live_location["lng"] if live_location else (destination_location.get("lng") or 0.0)
+    if charging_station.get("lat") and charging_station.get("lng"):
+        try:
+            kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+            base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
+            routes = fetch_routes(kart_obj, base_obj, base_obj)
+            current_route = routes.get('receive_points', [])
+            waypoint_index = 0
+            add_log(f"🏠 1-Click Override: Returning to base. Route points: {len(current_route)}")
+        except Exception as e:
+            add_log(f"⚠️ Return to base routing error: {e}")
+    else:
+        add_log("🏠 1-Click Override: Returning to base (No charging station coordinate configured)")
+        send_esp32("stop")
+    return {"status": "success", "phase": active_phase}
 
 @app.post("/backend/set_routing_engine")
 async def set_routing(req: Request):
