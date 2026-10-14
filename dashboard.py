@@ -712,9 +712,9 @@ with col_right:
     
     render_status_telemetry()
 
-    # --- MODE TOGGLE ---
+    # --- MODE & FLEET CONTROL ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">MODE CONTROL</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">FLEET COMMAND & MODE CONTROL</div>', unsafe_allow_html=True)
     
     # Handle the pop-up logic after rerun
     if st.session_state.get("open_manual_drive"):
@@ -724,14 +724,28 @@ with col_right:
     mode_status = fetch_status() or status_data
     is_manual_now = mode_status.get("mode") == "manual"
 
-    if is_manual_now:
-        if st.button("🔄  RESUME AUTONOMOUS", use_container_width=True, key="mode_btn"):
-            toggle_mode("autonomous")
-            st.rerun()
-    else:
-        if st.button("🚨  EMERGENCY OVERRIDE", use_container_width=True, key="mode_btn"):
-            toggle_mode("manual")
-            st.session_state["open_manual_drive"] = True
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if is_manual_now:
+            if st.button("🔄  AUTONOMOUS", use_container_width=True, key="mode_btn"):
+                toggle_mode("autonomous")
+                st.rerun()
+        else:
+            if st.button("🚨  OVERRIDE", use_container_width=True, key="mode_btn"):
+                toggle_mode("manual")
+                st.session_state["open_manual_drive"] = True
+                st.rerun()
+
+    with col_btn2:
+        if st.button("🏠  RETURN TO BASE", use_container_width=True, key="rtb_btn"):
+            try:
+                res = requests.post(f"{BACKEND_URL}/backend/return_to_base", timeout=3)
+                if res.status_code == 200:
+                    st.toast("🚀 Returning to Base Charging Station!", icon="🏠")
+                else:
+                    st.warning("Could not initiate return to base")
+            except Exception as e:
+                st.error(f"Error: {e}")
             st.rerun()
             
     st.markdown('<div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;"></div>', unsafe_allow_html=True)
@@ -749,12 +763,155 @@ with col_right:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- MANUAL DRIVE PAD (Standalone Web App for Zero Latency) ---
+    # --- IN-DASHBOARD EMERGENCY MANUAL REMOTE JOYSTICK ---
     if is_manual_now:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">🕹️ REMOTE CONTROL</div>', unsafe_allow_html=True)
-        st.markdown("<p style='color:#a1a1aa; font-size:14px; margin-bottom:15px;'>The heavy Streamlit manual drive has been replaced with a high-performance, zero-latency web controller.</p>", unsafe_allow_html=True)
-        st.markdown(f'<a href="{BACKEND_URL}/drive" target="_blank" style="display:block; width:100%; text-align:center; background:rgba(59, 130, 246, 0.15); border:1px solid rgba(59, 130, 246, 0.3); color:#60a5fa; padding:15px; border-radius:12px; font-weight:bold; text-decoration:none; font-family:Inter;">🚀 OPEN MANUAL DRIVE PAD</a>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">🕹️ EMERGENCY REMOTE OVERRIDE CONTROLLER</div>', unsafe_allow_html=True)
+        
+        joystick_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                * {{ box-sizing: border-box; user-select: none; margin: 0; padding: 0; }}
+                body {{ background: transparent; font-family: 'Inter', -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; }}
+                .pad-container {{ display: grid; grid-template-columns: repeat(3, 68px); grid-template-rows: repeat(3, 56px); gap: 8px; margin: 8px auto; }}
+                .pad-btn {{
+                    background: rgba(39, 39, 42, 0.8);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    color: #ededed;
+                    border-radius: 12px;
+                    font-size: 18px;
+                    font-weight: 700;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    transition: all 0.1s ease;
+                    touch-action: manipulation;
+                }}
+                .pad-btn:hover {{ background: rgba(63, 63, 70, 0.9); border-color: rgba(255, 255, 255, 0.25); }}
+                .pad-btn:active, .pad-btn.active {{
+                    background: #3b82f6;
+                    color: #ffffff;
+                    border-color: #60a5fa;
+                    transform: scale(0.94);
+                    box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+                }}
+                .btn-stop {{
+                    background: rgba(225, 29, 72, 0.2);
+                    border-color: rgba(225, 29, 72, 0.4);
+                    color: #fb7185;
+                    font-size: 13px;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
+                }}
+                .btn-stop:hover {{ background: rgba(225, 29, 72, 0.35); }}
+                .btn-stop:active, .btn-stop.active {{
+                    background: #e11d48;
+                    color: #ffffff;
+                    box-shadow: 0 0 16px rgba(225, 29, 72, 0.7);
+                }}
+                .aux-row {{ display: flex; gap: 8px; width: 100%; max-width: 220px; margin-top: 6px; }}
+                .aux-btn {{
+                    flex: 1;
+                    padding: 8px;
+                    background: rgba(30, 41, 59, 0.6);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 8px;
+                    color: #94a3b8;
+                    font-size: 11px;
+                    font-weight: 600;
+                    text-align: center;
+                    cursor: pointer;
+                    transition: all 0.12s;
+                }}
+                .aux-btn:hover {{ background: rgba(51, 65, 85, 0.8); color: #f8fafc; }}
+                .aux-btn:active {{ background: #0284c7; color: white; }}
+                .status-line {{ font-family: monospace; font-size: 11px; color: #64748b; margin-top: 8px; text-align: center; }}
+            </style>
+        </head>
+        <body>
+            <div class="pad-container">
+                <div></div>
+                <button class="pad-btn" id="btn-fwd" title="Forward (W or ↑)">▲</button>
+                <div></div>
+
+                <button class="pad-btn" id="btn-left" title="Left (A or ←)">◀</button>
+                <button class="pad-btn btn-stop" id="btn-stop" title="Emergency Stop (Space)">STOP</button>
+                <button class="pad-btn" id="btn-right" title="Right (D or →)">▶</button>
+
+                <div></div>
+                <button class="pad-btn" id="btn-rev" title="Reverse (S or ↓)">▼</button>
+                <div></div>
+            </div>
+
+            <div class="aux-row">
+                <button class="aux-btn" id="btn-beep">🔊 BEEP HORN</button>
+                <button class="aux-btn" id="btn-slow">⚡ SLOW</button>
+            </div>
+            <div class="status-line" id="cmd-status">READY: Keys W/A/S/D or Arrows</div>
+
+            <script>
+                const BACKEND = "{BACKEND_URL}";
+                let isSending = false;
+
+                function sendCmd(cmd) {{
+                    const el = document.getElementById("cmd-status");
+                    el.innerText = "COMMAND: " + cmd.toUpperCase();
+                    el.style.color = cmd === "stop" ? "#f43f5e" : "#38bdf8";
+
+                    if (cmd === "beep") {{
+                        fetch(BACKEND + "/backend/beep", {{ method: "POST" }}).catch(() => {{}});
+                        return;
+                    }}
+
+                    fetch(BACKEND + "/backend/manual_control", {{
+                        method: "POST",
+                        headers: {{ "Content-Type": "application/json" }},
+                        body: JSON.stringify({{ cmd: cmd }})
+                    }}).catch(err => {{
+                        el.innerText = "ERR: " + err.message;
+                        el.style.color = "#ef4444";
+                    }});
+                }}
+
+                function bindBtn(id, cmd) {{
+                    const btn = document.getElementById(id);
+                    if (!btn) return;
+                    btn.addEventListener("mousedown", (e) => {{ e.preventDefault(); sendCmd(cmd); }});
+                    btn.addEventListener("touchstart", (e) => {{ e.preventDefault(); sendCmd(cmd); }});
+                }}
+
+                bindBtn("btn-fwd", "forward");
+                bindBtn("btn-left", "left");
+                bindBtn("btn-stop", "stop");
+                bindBtn("btn-right", "right");
+                bindBtn("btn-rev", "reverse");
+                bindBtn("btn-beep", "beep");
+                bindBtn("btn-slow", "slow");
+
+                // Keyboard Controls
+                window.addEventListener("keydown", (e) => {{
+                    if (e.repeat) return;
+                    const key = e.key.toLowerCase();
+                    if (key === "arrowup" || key === "w") {{ document.getElementById("btn-fwd").classList.add("active"); sendCmd("forward"); }}
+                    else if (key === "arrowdown" || key === "s") {{ document.getElementById("btn-rev").classList.add("active"); sendCmd("reverse"); }}
+                    else if (key === "arrowleft" || key === "a") {{ document.getElementById("btn-left").classList.add("active"); sendCmd("left"); }}
+                    else if (key === "arrowright" || key === "d") {{ document.getElementById("btn-right").classList.add("active"); sendCmd("right"); }}
+                    else if (key === " " || key === "escape") {{ document.getElementById("btn-stop").classList.add("active"); sendCmd("stop"); }}
+                    else if (key === "b" || key === "h") {{ sendCmd("beep"); }}
+                }});
+
+                window.addEventListener("keyup", (e) => {{
+                    document.querySelectorAll(".pad-btn").forEach(b => b.classList.remove("active"));
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        components.html(joystick_html, height=260)
+        st.markdown(f'<a href="{BACKEND_URL}/drive" target="_blank" style="display:block; width:100%; text-align:center; background:rgba(255, 255, 255, 0.05); border:1px solid rgba(255, 255, 255, 0.1); color:#94a3b8; padding:8px; border-radius:8px; font-size:11px; font-weight:600; text-decoration:none; font-family:Inter; margin-top:4px;">↗ POP OUT STANDALONE DRIVE PAD</a>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- CARGO LATCH (static, no auto-refresh) ---
@@ -775,9 +932,9 @@ with col_right:
                 st.error("⚠️ Unlock command failed")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- SATELLITE TRACKING MAP ---
+    # --- SATELLITE & CYBER DARK TRACKING MAP ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">SATELLITE TRACKING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">LIVE SATELLITE & ROUTE TRACKING</div>', unsafe_allow_html=True)
     
     GMAPS_API_KEY = os.environ.get("GMAPS_API_KEY", "AIzaSyBX0xNBFK24V2DZgMQHFku3tWcJWtVjgds")
     
@@ -786,7 +943,38 @@ with col_right:
     <html>
     <head>
         <style>
-            #map {{ height: 350px; width: 100%; border-radius: 8px; }}
+            * {{ box-sizing: border-box; }}
+            #map-wrapper {{ position: relative; width: 100%; height: 360px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }}
+            #map {{ height: 100%; width: 100%; }}
+            .map-ctrl-bar {{
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 10;
+                display: flex;
+                gap: 6px;
+                background: rgba(10, 10, 15, 0.8);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            .map-type-btn {{
+                background: transparent;
+                border: none;
+                color: #94a3b8;
+                font-family: 'Inter', sans-serif;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 4px 8px;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: all 0.15s;
+            }}
+            .map-type-btn.active {{
+                background: #3b82f6;
+                color: #ffffff;
+            }}
         </style>
         <script>
             (g=>{{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={{}});var d=b.maps||(b.maps={{}}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${{c}}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))}})({{
@@ -796,46 +984,101 @@ with col_right:
         </script>
     </head>
     <body style="margin:0; padding:0; background:#0a0f1a;">
-        <div id="map"></div>
+        <div id="map-wrapper">
+            <div class="map-ctrl-bar">
+                <button class="map-type-btn active" id="btn-dark" onclick="setMode('dark')">Dark Cyber</button>
+                <button class="map-type-btn" id="btn-sat" onclick="setMode('hybrid')">Satellite</button>
+            </div>
+            <div id="map"></div>
+        </div>
+
         <script>
             let map, botMarker, sourceMarker, destMarker, routePoly;
             
+            const darkMapStyles = [
+                {{ elementType: 'geometry', stylers: [{{ color: '#18181b' }}] }},
+                {{ elementType: 'labels.text.stroke', stylers: [{{ color: '#09090b' }}] }},
+                {{ elementType: 'labels.text.fill', stylers: [{{ color: '#a1a1aa' }}] }},
+                {{ featureType: 'road', elementType: 'geometry', stylers: [{{ color: '#27272a' }}] }},
+                {{ featureType: 'road.highway', elementType: 'geometry', stylers: [{{ color: '#3f3f46' }}] }},
+                {{ featureType: 'water', elementType: 'geometry', stylers: [{{ color: '#09090b' }}] }},
+                {{ featureType: 'poi', elementType: 'labels.text.fill', stylers: [{{ color: '#71717a' }}] }}
+            ];
+
+            function setMode(mode) {{
+                if (!map) return;
+                document.getElementById('btn-dark').classList.toggle('active', mode === 'dark');
+                document.getElementById('btn-sat').classList.toggle('active', mode === 'hybrid');
+                if (mode === 'dark') {{
+                    map.setMapTypeId('roadmap');
+                    map.setOptions({{ styles: darkMapStyles }});
+                }} else {{
+                    map.setMapTypeId('hybrid');
+                    map.setOptions({{ styles: [] }});
+                }}
+            }}
+
             async function initMap() {{
-                const {{ Map, Polyline }} = await google.maps.importLibrary("maps");
-                const {{ AdvancedMarkerElement, PinElement }} = await google.maps.importLibrary("marker");
+                const {{ Map }} = await google.maps.importLibrary("maps");
                 
                 map = new Map(document.getElementById("map"), {{
-                    zoom: 15,
-                    center: {{ lat: 37.7749, lng: -122.4194 }}, // Default SF
-                    mapTypeId: 'satellite',
-                    mapId: 'DEMO_MAP_ID',
+                    zoom: 16,
+                    center: {{ lat: 24.4332, lng: 77.1585 }}, // Default JUET Campus
+                    styles: darkMapStyles,
                     disableDefaultUI: true,
+                    zoomControl: true,
                 }});
 
-                const srcPin = new PinElement({{ background: "#ffffff", borderColor: "#27272a", glyphColor: "transparent" }});
-                const dstPin = new PinElement({{ background: "#f59e0b", borderColor: "#27272a", glyphColor: "transparent" }});
-
+                // Dynamic Directional Arrow for Autonomous Cart
                 botMarker = new google.maps.Marker({{ 
                     map: map, 
                     icon: {{
                         path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                        scale: 6,
+                        scale: 7,
                         fillColor: '#22c55e',
                         fillOpacity: 1,
                         strokeColor: '#09090b',
                         strokeWeight: 2,
                         rotation: 0,
                     }},
-                    zIndex: 100
+                    zIndex: 100,
+                    title: "AutoDrop Cart"
                 }});
-                sourceMarker = new AdvancedMarkerElement({{ map: map, content: srcPin.element, title: "Source" }});
-                destMarker = new AdvancedMarkerElement({{ map: map, content: dstPin.element, title: "Destination" }});
+
+                // Source (Pickup) Circle Marker - Matches Mobile App
+                sourceMarker = new google.maps.Marker({{
+                    map: map,
+                    icon: {{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: '#ffffff',
+                        fillOpacity: 1,
+                        strokeColor: '#27272a',
+                        strokeWeight: 3,
+                    }},
+                    title: "Pickup Location"
+                }});
+
+                // Destination (Dropoff) Amber Circle Marker - Matches Mobile App
+                destMarker = new google.maps.Marker({{
+                    map: map,
+                    icon: {{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: '#f59e0b',
+                        fillOpacity: 1,
+                        strokeColor: '#27272a',
+                        strokeWeight: 3,
+                    }},
+                    title: "Dropoff Location"
+                }});
                 
+                // Blue Route Polyline - Matches Mobile App
                 routePoly = new google.maps.Polyline({{
                     geodesic: true,
                     strokeColor: '#3b82f6',
-                    strokeOpacity: 0.8,
-                    strokeWeight: 4,
+                    strokeOpacity: 0.85,
+                    strokeWeight: 5,
                     map: map,
                 }});
                 
@@ -859,10 +1102,12 @@ with col_right:
                             if (curr) {{
                                 const dLng = data.cart.lng - curr.lng();
                                 const dLat = data.cart.lat - curr.lat();
-                                const heading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
-                                const icon = botMarker.getIcon();
-                                icon.rotation = heading;
-                                botMarker.setIcon(icon);
+                                if (dLng !== 0 || dLat !== 0) {{
+                                    const heading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
+                                    const icon = botMarker.getIcon();
+                                    icon.rotation = heading;
+                                    botMarker.setIcon(icon);
+                                }}
                             }}
                             botMarker.setPosition(data.cart);
                             bounds.extend(data.cart);
@@ -870,31 +1115,31 @@ with col_right:
                         }}
                         
                         if (data.source) {{
-                            sourceMarker.position = data.source;
-                            sourceMarker.map = map;
+                            sourceMarker.setPosition(data.source);
+                            sourceMarker.setMap(map);
                             bounds.extend(data.source);
                             hasBounds = true;
                         }} else {{
-                            sourceMarker.map = null;
+                            sourceMarker.setMap(null);
                         }}
                         
                         if (data.destination) {{
-                            destMarker.position = data.destination;
-                            destMarker.map = map;
+                            destMarker.setPosition(data.destination);
+                            destMarker.setMap(map);
                             bounds.extend(data.destination);
                             hasBounds = true;
                         }} else {{
-                            destMarker.map = null;
+                            destMarker.setMap(null);
                         }}
                         
-                        if (data.route_points) {{
+                        if (data.route_points && data.route_points.length > 0) {{
                             routePoly.setPath(data.route_points);
                         }} else {{
                             routePoly.setPath([]);
                         }}
                         
                         if (hasBounds && !window.hasFittedBounds) {{
-                            map.fitBounds(bounds);
+                            map.fitBounds(bounds, 40);
                             if(map.getZoom() > 18) map.setZoom(18);
                             window.hasFittedBounds = true;
                         }}
@@ -910,5 +1155,5 @@ with col_right:
     </html>
     """
     
-    components.html(map_html, height=360)
+    components.html(map_html, height=380)
     st.markdown('</div>', unsafe_allow_html=True)
