@@ -966,7 +966,7 @@ async def manual_control(req: ControlRequest):
         )
     
     cmd = req.action.lower()
-    if cmd in ["forward", "backward", "reverse", "left", "right", "stop", "lock", "unlock", "beep"]:
+    if cmd in ["forward", "backward", "reverse", "left", "right", "curve_left", "curve_right", "stop", "lock", "unlock", "beep"] or cmd.startswith("steer:"):
         send_esp32(cmd)
         if cmd == "lock":
             cargo_state = "LOCKED"
@@ -982,6 +982,11 @@ async def trigger_beep():
     add_log("🔔 Cart Bell / Piezo Buzzer Sounded")
     return {"status": "success", "message": "beep sent"}
 
+@app.get("/backend/telemetry/stats")
+async def get_telemetry_stats():
+    """Retrieve blackbox telemetry statistics and persistent cache status."""
+    return telemetry_db.get_stats()
+
 @app.post("/backend/return_to_base")
 async def trigger_return_to_base():
     global active_phase, current_route, waypoint_index
@@ -990,10 +995,17 @@ async def trigger_return_to_base():
     start_lng = live_location["lng"] if live_location else (destination_location.get("lng") or 0.0)
     if charging_station.get("lat") and charging_station.get("lng"):
         try:
-            kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
-            base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
-            routes = fetch_routes(kart_obj, base_obj, base_obj)
-            current_route = routes.get('receive_points', [])
+            # Check route cache first
+            cached_rtb = telemetry_db.get_cached_route((start_lat, start_lng), (charging_station["lat"], charging_station["lng"]))
+            if cached_rtb:
+                current_route = cached_rtb
+            else:
+                kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+                base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
+                routes = fetch_routes(kart_obj, base_obj, base_obj)
+                current_route = routes.get('receive_points', [])
+                if current_route:
+                    telemetry_db.save_cached_route((start_lat, start_lng), (charging_station["lat"], charging_station["lng"]), current_route)
             waypoint_index = 0
             add_log(f"🏠 1-Click Override: Returning to base. Route points: {len(current_route)}")
         except Exception as e:
@@ -1001,6 +1013,8 @@ async def trigger_return_to_base():
     else:
         add_log("🏠 1-Click Override: Returning to base (No charging station coordinate configured)")
         send_esp32("stop")
+    await broadcast_to_dashboard()
+    await broadcast_to_tracking()
     return {"status": "success", "phase": active_phase}
 
 @app.post("/backend/set_routing_engine")
@@ -1026,7 +1040,7 @@ async def set_charging_station(request: Request):
 
 @app.post("/backend/new_delivery")
 async def new_delivery(request: Request):
-    global active_phase, source_location, destination_location, current_delivery_id, current_route, waypoint_index, charging_station
+    global active_phase, source_location, destination_location, current_delivery_id, current_route, waypoint_index, charging_station, stored_deliver_points
     body = await request.json()
     
     pickup = body.get("pickup", {})
@@ -1036,20 +1050,55 @@ async def new_delivery(request: Request):
     source_location = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
     destination_location = {"lat": dropoff.get("lat", 0), "lng": dropoff.get("lng", 0)}
     
-    # Use pickup as charging/base station for now
+    # Use pickup as charging/base station
     charging_station = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
     
-    # Calculate route to sender and dropoff
     start_lat = live_location["lat"] if live_location else charging_station["lat"]
     start_lng = live_location["lng"] if live_location else charging_station["lng"]
-    kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
-    market_obj = Coordinates(latitude=source_location["lat"], longitude=source_location["lng"])
-    del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
-    
-    routes = fetch_routes(kart_obj, market_obj, del_obj) 
-    receive_pts = routes.get('receive_points', [])
-    deliver_pts = routes.get('deliver_points', [])
-    
+
+    # 1. Accept Google Maps route points directly from AutoDrop app if provided
+    app_route = body.get("route_points") or body.get("route") or []
+    deliver_pts = []
+    if app_route:
+        deliver_pts = [{"latitude": p["lat"], "longitude": p["lng"]} for p in app_route if "lat" in p and "lng" in p]
+        if deliver_pts:
+            telemetry_db.save_cached_route(
+                (source_location["lat"], source_location["lng"]),
+                (destination_location["lat"], destination_location["lng"]),
+                deliver_pts
+            )
+            add_log(f"🗺️ Received & Cached {len(deliver_pts)} Google Maps route points from AutoDrop app!")
+
+    # 2. Check persistent SQLite cache for repeat addresses if not sent
+    if not deliver_pts:
+        cached = telemetry_db.get_cached_route(
+            (source_location["lat"], source_location["lng"]),
+            (destination_location["lat"], destination_location["lng"])
+        )
+        if cached:
+            deliver_pts = cached
+            add_log(f"⚡ Loaded {len(deliver_pts)} waypoints from Persistent Route Cache!")
+
+    # 3. Check cache / fetch route to sender
+    cached_pickup = telemetry_db.get_cached_route(
+        (start_lat, start_lng),
+        (source_location["lat"], source_location["lng"])
+    )
+    receive_pts = cached_pickup if cached_pickup else []
+
+    if not receive_pts or not deliver_pts:
+        kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+        market_obj = Coordinates(latitude=source_location["lat"], longitude=source_location["lng"])
+        del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
+        
+        routes = fetch_routes(kart_obj, market_obj, del_obj)
+        if not receive_pts:
+            receive_pts = routes.get('receive_points', [])
+        if not deliver_pts:
+            deliver_pts = routes.get('deliver_points', [])
+
+    stored_deliver_points = deliver_pts.copy()
+
     dist_to_pickup = calculate_distance((start_lat, start_lng), (source_location["lat"], source_location["lng"]))
     if dist_to_pickup < 10.0 or not receive_pts:
         current_route = deliver_pts if deliver_pts else receive_pts
@@ -1061,7 +1110,9 @@ async def new_delivery(request: Request):
         add_log(f"📍 New Delivery: Heading to sender. Route points: {len(current_route)}")
 
     waypoint_index = 0
-    return {"status": "ok", "delivery_id": current_delivery_id, "phase": active_phase}
+    await broadcast_to_dashboard()
+    await broadcast_to_tracking()
+    return {"status": "ok", "delivery_id": current_delivery_id, "phase": active_phase, "waypoints": len(current_route)}
 
 @app.post("/backend/verify_qr")
 async def verify_qr(request: Request):
@@ -1083,23 +1134,31 @@ async def verify_qr(request: Request):
 
 @app.post("/backend/dispatch")
 async def dispatch_cart(request: Request):
-    global active_phase, cargo_state, current_route, waypoint_index
+    global active_phase, cargo_state, current_route, waypoint_index, stored_deliver_points
     cargo_state = "LOCKED"
     await send_esp32("lock")
     
-    # Calculate route to destination
-    start_lat = live_location["lat"] if live_location else source_location["lat"]
-    start_lng = live_location["lng"] if live_location else source_location["lng"]
-    kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
-    del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
-    
-    routes = fetch_routes(kart_obj, del_obj, del_obj)
-    current_route = routes.get('receive_points', [])
+    # Use the Google Maps delivery route
+    if stored_deliver_points:
+        current_route = stored_deliver_points.copy()
+    else:
+        start_lat = live_location["lat"] if live_location else source_location["lat"]
+        start_lng = live_location["lng"] if live_location else source_location["lng"]
+        cached = telemetry_db.get_cached_route((start_lat, start_lng), (destination_location["lat"], destination_location["lng"]))
+        if cached:
+            current_route = cached
+        else:
+            kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+            del_obj = Coordinates(latitude=destination_location["lat"], longitude=destination_location["lng"])
+            routes = fetch_routes(kart_obj, del_obj, del_obj)
+            current_route = routes.get('receive_points', [])
+            
     waypoint_index = 0
-    
     active_phase = "DELIVERING"
-    add_log(f"📍 Dispatched! Heading to destination. Route points: {len(current_route)}")
-    return {"status": "dispatched", "phase": active_phase}
+    add_log(f"📍 Dispatched! Following Google Maps route to destination ({len(current_route)} waypoints)")
+    await broadcast_to_dashboard()
+    await broadcast_to_tracking()
+    return {"status": "dispatched", "phase": active_phase, "waypoints": len(current_route)}
 
 @app.post("/backend/complete_retrieval")
 async def complete_retrieval(request: Request):
