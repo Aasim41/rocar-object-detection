@@ -61,11 +61,32 @@ def fetch_routes(kart_coords, marketplace_coords, delivery_coords):
         d_lat, d_lng = round(dst.latitude, 4), round(dst.longitude, 4)
         return f"{routing_engine}:{s_lat},{s_lng}->{d_lat},{d_lng}"
 
-    k_key = cache_key(kart_coords, marketplace_coords)
-    m_key = cache_key(marketplace_coords, delivery_coords)
-    
-    receive_points = route_cache.get(k_key)
-    deliver_points = route_cache.get(m_key)
+    # Check persistent SQLite cache first
+    try:
+        from telemetry_db import telemetry_db
+    except ImportError:
+        try:
+            import sys, os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from telemetry_db import telemetry_db
+        except Exception:
+            telemetry_db = None
+
+    k_orig = (kart_coords.latitude, kart_coords.longitude)
+    m_dest = (marketplace_coords.latitude, marketplace_coords.longitude)
+    d_dest = (delivery_coords.latitude, delivery_coords.longitude)
+
+    receive_points = None
+    deliver_points = None
+
+    if telemetry_db:
+        receive_points = telemetry_db.get_cached_route(k_orig, m_dest)
+        deliver_points = telemetry_db.get_cached_route(m_dest, d_dest)
+
+    if not receive_points:
+        receive_points = route_cache.get(k_key)
+    if not deliver_points:
+        deliver_points = route_cache.get(m_key)
     
     if routing_engine == "self":
         kc = _campus_coord_dict(kart_coords)
@@ -75,10 +96,14 @@ def fetch_routes(kart_coords, marketplace_coords, delivery_coords):
         if not receive_points:
             receive_points = short_distance(kc, mc)
             route_cache[k_key] = receive_points
+            if telemetry_db and receive_points:
+                telemetry_db.save_cached_route(k_orig, m_dest, receive_points)
             
         if not deliver_points:
             deliver_points = short_distance(mc, dc)
             route_cache[m_key] = deliver_points
+            if telemetry_db and deliver_points:
+                telemetry_db.save_cached_route(m_dest, d_dest, deliver_points)
             
     else:
         if not receive_points:
@@ -95,6 +120,11 @@ def fetch_routes(kart_coords, marketplace_coords, delivery_coords):
         
         route_cache[k_key] = receive_points
         route_cache[m_key] = deliver_points
+        if telemetry_db:
+            if receive_points:
+                telemetry_db.save_cached_route(k_orig, m_dest, receive_points)
+            if deliver_points:
+                telemetry_db.save_cached_route(m_dest, d_dest, deliver_points)
 
     return {
         "receive_points": simplify_route(receive_points, min_distance_meters=2.0),

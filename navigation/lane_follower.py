@@ -535,11 +535,23 @@ class LaneFollower:
         if self.is_intersection:
             raw *= 0.3
 
-        # Quantise to command
-        if raw < -self.dead_zone:
-            cmd = "left"
+        # Quantise to proportional differential steering command
+        if raw < -0.65:
+            cmd = "left"  # Hard pivot turn
+        elif raw < -self.dead_zone:
+            # Smooth proportional curve left
+            bias = int(abs(raw) * 80)
+            l_spd = max(90, 200 - bias)
+            r_spd = min(250, 190 + bias // 2)
+            cmd = f"steer:{l_spd}:{r_spd}"
+        elif raw > 0.65:
+            cmd = "right" # Hard pivot turn
         elif raw > self.dead_zone:
-            cmd = "right"
+            # Smooth proportional curve right
+            bias = int(abs(raw) * 80)
+            l_spd = min(250, 190 + bias // 2)
+            r_spd = max(90, 200 - bias)
+            cmd = f"steer:{l_spd}:{r_spd}"
         else:
             cmd = "forward"
 
@@ -556,10 +568,14 @@ class LaneFollower:
 
         raw = self.prev_steer * 0.90
         self.prev_steer = raw
-        if raw < -self.dead_zone:
+        if raw < -0.65:
             cmd = "left"
-        elif raw > self.dead_zone:
+        elif raw < -self.dead_zone:
+            cmd = "curve_left"
+        elif raw > 0.65:
             cmd = "right"
+        elif raw > self.dead_zone:
+            cmd = "curve_right"
         else:
             cmd = "forward"
         return raw, cmd, f"Road fading ({self.no_road_frames}/{self.max_lost})"

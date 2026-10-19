@@ -64,5 +64,7 @@ def navigate(heading, current_coords, points, waypoint_index=0):
 
     return {
         "command": command,
-        "waypoint_index": new_index
+        "waypoint_index": new_index,
+        "angle_error": angle_error,
+        "desired_bearing": desired_bearing
     }

@@ -138,6 +138,23 @@ void turnRight() {
   currentDirection = -2;
 }
 
+// Proportional Differential Steering: Both tracks move forward at different speeds for smooth curving
+void steerDifferential(int leftSpeed, int rightSpeed) {
+  safeDirectionChange(1);
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  setMotorSpeed(constrain(leftSpeed, 0, 255), constrain(rightSpeed, 0, 255));
+  currentDirection = 1;
+}
+
+void curveLeft() {
+  steerDifferential(120, 210);
+}
+
+void curveRight() {
+  steerDifferential(210, 120);
+}
+
 void processCommand(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
@@ -176,6 +193,39 @@ void processCommand(String cmd) {
   else if (cmd == "right") {
     if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
       turnRight();
+      lastMotorChange = now;
+    }
+  }
+  else if (cmd == "curve_left") {
+    if (isBlocked) return;
+    if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
+      curveLeft();
+      lastMotorChange = now;
+    }
+  }
+  else if (cmd == "curve_right") {
+    if (isBlocked) return;
+    if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
+      curveRight();
+      lastMotorChange = now;
+    }
+  }
+  else if (cmd.startsWith("steer:")) {
+    if (isBlocked) return;
+    if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
+      int firstColon = cmd.indexOf(':');
+      int secondColon = cmd.indexOf(':', firstColon + 1);
+      if (secondColon > 0) {
+        int lSpeed = cmd.substring(firstColon + 1, secondColon).toInt();
+        int rSpeed = cmd.substring(secondColon + 1).toInt();
+        steerDifferential(lSpeed, rSpeed);
+      } else {
+        int bias = cmd.substring(firstColon + 1).toInt();
+        int baseSpeed = SPEED_FULL - 35;
+        int lSpeed = constrain(baseSpeed - bias, 0, 255);
+        int rSpeed = constrain(baseSpeed + bias, 0, 255);
+        steerDifferential(lSpeed, rSpeed);
+      }
       lastMotorChange = now;
     }
   }
