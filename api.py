@@ -27,6 +27,7 @@ from navigation.pipeline import fetch_routes
 from navigation.navigate import navigate, calculate_bearing
 from navigation.fnpp import to_tuple, calculate_distance
 from navigation.lane_follower import LaneFollower
+from telemetry_db import telemetry_db
 
 lane_follower = LaneFollower()
 state_lock = threading.Lock()
