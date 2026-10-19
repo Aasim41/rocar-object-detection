@@ -229,3 +229,4 @@ class MissionTelemetryDB:
 
 # Global Singleton Instance
 telemetry_db = MissionTelemetryDB()
+
