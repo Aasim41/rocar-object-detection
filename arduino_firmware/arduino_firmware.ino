@@ -1,25 +1,47 @@
-#include <Servo.h>
+#if defined(ESP32)
+  #include <ESP32Servo.h>
 
-#define IN1 7
-#define IN2 8
-#define IN3 11
-#define IN4 12
+  // --- ESP32 Pin Mapping ---
+  #define IN1 23
+  #define IN2 22
+  #define IN3 21
+  #define IN4 19
 
-#define ENA 5
-#define ENB 6
+  #define ENA 25
+  #define ENB 26
+
+  #define CARGO_SERVO_PIN  18
+  #define SCAN_SERVO_PIN   13
+
+  #define TRIG_PIN  27
+  #define ECHO_PIN  14
+
+  #define BUZZER_PIN 12
+#else
+  // --- Arduino Uno / Nano (AVR) Pin Mapping ---
+  #include <Servo.h>
+
+  #define IN1 7
+  #define IN2 8
+  #define IN3 11
+  #define IN4 12
+
+  #define ENA 5
+  #define ENB 6
+
+  #define CARGO_SERVO_PIN  10
+  #define SCAN_SERVO_PIN   9
+
+  #define TRIG_PIN  A0
+  #define ECHO_PIN  A1
+
+  #define BUZZER_PIN 2
+#endif
 
 #define SPEED_FULL   255
 #define SPEED_SLOW   120
 #define SPEED_DRIFT  160
-
-#define CARGO_SERVO_PIN  10
-#define SCAN_SERVO_PIN   9
-
-#define TRIG_PIN  A0
-#define ECHO_PIN  A1
-#define MAX_DIST  400
-
-#define BUZZER_PIN 2
+#define MAX_DIST     400
 
 #define WATCHDOG_MS       1500
 #define DEADTIME_MS       50
