@@ -457,8 +457,9 @@ def yolo_loop():
     """Single YOLO loop: runs inference once and caches the annotated frame."""
     global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, annotated_jpeg
     global current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
-    global obstacle_stopped_since, obstacle_creep_active, obstacle_creep_start, scan_servo_angle
     add_log("🤖 YOLO loop started (Low-Latency Mode)")
+    last_telemetry_time = 0.0
+    last_logged_cmd = ""
     
     while True:
         try:
@@ -634,19 +635,23 @@ def yolo_loop():
                         obstacle_creep_active = False
                         
                         if dist_cm < 80:
-                            # Close — slow + hard steer
+                            # Close — slow + hard pivot steer
                             send_esp32("slow")
                             current_status = f"↪️ Dodging {closest_name} {steer_label} ({dist_cm}cm)"
+                            send_esp32(steer_dir)
                         elif dist_cm < 200:
-                            # Medium range — slow + gentle steer
+                            # Medium range — slow + smooth proportional curve
+                            curve_cmd = "curve_left" if steer_dir == "left" else "curve_right"
                             send_esp32("slow")
-                            current_status = f"↪️ Avoiding {closest_name} {steer_label} ({dist_cm}cm)"
+                            send_esp32(curve_cmd)
+                            current_status = f"↪️ Curving around {closest_name} {steer_label} ({dist_cm}cm)"
                         else:
-                            # Far — normal speed + steer
+                            # Far — normal speed + smooth curve
+                            curve_cmd = "curve_left" if steer_dir == "left" else "curve_right"
+                            send_esp32(curve_cmd)
                             current_status = f"↪️ Passing {closest_name} {steer_label}"
                         
                         add_log(f"Avoiding {closest_name} → {steer_label} (gap {gap_ratio:.0%})")
-                        send_esp32(steer_dir)
                         obstacle_detected = True
                     
                     elif is_moving_away and dist_cm > 50:
@@ -757,7 +762,13 @@ def yolo_loop():
                                         wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
                                         nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
                                     
-                                    cmd_map = {"F": "forward", "L": "left", "SL": "left", "R": "right", "SR": "right"}
+                                    cmd_map = {
+                                        "F": "forward",
+                                        "SL": "curve_left",   # Smooth proportional curve left
+                                        "SR": "curve_right",  # Smooth proportional curve right
+                                        "L": "left",          # Sharp pivot turn at 90deg junction
+                                        "R": "right"          # Sharp pivot turn at 90deg junction
+                                    }
                                     gps_cmd = cmd_map.get(gps_cmd, "forward")
                                     
                                     # At intersections, GPS ALWAYS overrides lane following
@@ -780,8 +791,8 @@ def yolo_loop():
                     else:
                         # ── Scan Servo Reset ──
                         target_scan_angle = "scan_center"
-                        if nav_cmd == "left": target_scan_angle = "scan_left"
-                        elif nav_cmd == "right": target_scan_angle = "scan_right"
+                        if "left" in nav_cmd: target_scan_angle = "scan_left"
+                        elif "right" in nav_cmd: target_scan_angle = "scan_right"
                         
                         if scan_servo_angle != target_scan_angle:
                             send_esp32(target_scan_angle)
@@ -792,6 +803,30 @@ def yolo_loop():
                         if nav_cmd == "forward":
                             last_webots_steer = lane_steer
                         obstacle_detected = False
+
+                        # ── Blackbox Mission Telemetry Logging (SQLite) ──
+                        now_t = time.time()
+                        if now_t - last_telemetry_time >= 1.0 or nav_cmd != last_logged_cmd:
+                            last_telemetry_time = now_t
+                            last_logged_cmd = nav_cmd
+                            try:
+                                telemetry_db.log_telemetry(
+                                    delivery_id=current_delivery_id or "idle",
+                                    phase=active_phase,
+                                    mode=current_mode,
+                                    lat=live_location["lat"] if live_location else None,
+                                    lng=live_location["lng"] if live_location else None,
+                                    heading=current_heading,
+                                    speed=gps_speed,
+                                    motor_cmd=nav_cmd,
+                                    ultrasonic_cm=current_distance_cm,
+                                    obstacle_detected=obstacle_detected,
+                                    obstacle_name=closest_name if obstacle_detected else None,
+                                    cte=lane_steer,
+                                    steer_bias=0.0
+                                )
+                            except Exception:
+                                pass
             
             time.sleep(0.03)
         except Exception as e:
