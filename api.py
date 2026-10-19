@@ -1038,6 +1038,36 @@ async def set_charging_station(request: Request):
     charging_station = {"lat": body["lat"], "lng": body["lng"]}
     return {"status": "ok", "charging_station": charging_station}
 
+@app.post("/backend/set_route")
+async def set_route_endpoint(request: Request):
+    """Directly ingest Google Maps route points from AutoDrop app for live navigation."""
+    global current_route, waypoint_index, stored_deliver_points, source_location, destination_location
+    try:
+        body = await request.json()
+        pts = body.get("route_points") or body.get("route") or []
+        if pts:
+            deliver_pts = [{"latitude": p["lat"], "longitude": p["lng"]} for p in pts if "lat" in p and "lng" in p]
+            if deliver_pts:
+                stored_deliver_points = deliver_pts.copy()
+                if active_phase == "DELIVERING" or not current_route:
+                    current_route = deliver_pts
+                    waypoint_index = 0
+                
+                # Cache the route if coordinates are present
+                if source_location.get("lat") and destination_location.get("lat"):
+                    telemetry_db.save_cached_route(
+                        (source_location["lat"], source_location["lng"]),
+                        (destination_location["lat"], destination_location["lng"]),
+                        deliver_pts
+                    )
+                add_log(f"🗺️ AutoDrop Sync: Ingested & cached {len(deliver_pts)} Google Maps route points!")
+                await broadcast_to_tracking()
+                return {"status": "ok", "waypoints": len(deliver_pts)}
+        return JSONResponse(status_code=400, content={"status": "error", "message": "No valid route points provided"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 @app.post("/backend/new_delivery")
 async def new_delivery(request: Request):
     global active_phase, source_location, destination_location, current_delivery_id, current_route, waypoint_index, charging_station, stored_deliver_points

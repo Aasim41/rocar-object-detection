@@ -451,6 +451,15 @@ def fetch_status():
         pass
     return None
 
+def fetch_telemetry_stats():
+    try:
+        res = requests.get(f"{BACKEND_URL}/backend/telemetry/stats", timeout=2)
+        if res.ok:
+            return res.json()
+    except Exception:
+        pass
+    return {"total_logs": 0, "cached_routes": 0, "cache_hits": 0, "recent_logs": []}
+
 def send_control(action: str):
     try:
         requests.post(f"{BACKEND_URL}/backend/manual_control", json={"action": action}, timeout=2)
@@ -595,6 +604,80 @@ with col_left:
         st.markdown('</div>', unsafe_allow_html=True)
         
     render_system_log()
+
+    # --- MISSION TELEMETRY BLACKBOX & ROUTE CACHE ---
+    @st.fragment(run_every="2s")
+    def render_mission_telemetry_cache():
+        t_stats = fetch_telemetry_stats()
+        total_logs = t_stats.get("total_logs", 0)
+        cached_routes = t_stats.get("cached_routes", 0)
+        cache_hits = t_stats.get("cache_hits", 0)
+        recent_logs = t_stats.get("recent_logs", [])
+        
+        st.markdown('<div class="panel" style="margin-top: 14px;">', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">MISSION TELEMETRY BLACKBOX & ROUTE CACHE</div>', unsafe_allow_html=True)
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"""
+            <div class="metric-tile" style="padding: 8px;">
+                <div class="metric-tile-value" style="font-size:16px; color:#38bdf8;">{total_logs:,}</div>
+                <div class="metric-tile-label" style="font-size:8px;">FLIGHT TICKS</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""
+            <div class="metric-tile" style="padding: 8px;">
+                <div class="metric-tile-value" style="font-size:16px; color:#a855f7;">{cached_routes}</div>
+                <div class="metric-tile-label" style="font-size:8px;">ROUTES CACHED</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"""
+            <div class="metric-tile" style="padding: 8px;">
+                <div class="metric-tile-value" style="font-size:16px; color:#4ade80;">{cache_hits}</div>
+                <div class="metric-tile-label" style="font-size:8px;">CACHE HITS</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        if recent_logs:
+            rows_html = ""
+            for r in recent_logs[:8]:
+                ts = r.get("timestamp", "").split()[-1] if r.get("timestamp") else "--:--:--"
+                cmd = r.get("motor_cmd", "stop")
+                phase = (r.get("phase") or "IDLE")[:8]
+                dist = r.get("ultrasonic_cm", 999)
+                bias = r.get("steer_bias", 0.0)
+                
+                # Command Color
+                if "steer" in cmd or "curve" in cmd:
+                    cmd_color = "#38bdf8" # Blue
+                elif "forward" in cmd or "slow" in cmd:
+                    cmd_color = "#4ade80" # Green
+                elif "stop" in cmd or "BLOCKED" in cmd:
+                    cmd_color = "#f43f5e" # Rose
+                else:
+                    cmd_color = "#fbbf24" # Yellow
+                
+                dist_str = f"{dist}cm" if dist < 900 else "--"
+                bias_str = f"b:{bias:+.2f}" if abs(bias) > 0.01 else "--"
+                
+                rows_html += f"""
+                <div class="log-line" style="display:flex; justify-content:space-between; font-size:10px; font-family:'JetBrains Mono',monospace; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+                    <span style="color:#64748b; width:65px;">{ts}</span>
+                    <span style="color:#94a3b8; font-weight:600; width:75px;">{phase}</span>
+                    <span style="color:{cmd_color}; font-weight:700; flex:1;">{cmd}</span>
+                    <span style="color:#e2e8f0; width:50px; text-align:right;">{dist_str}</span>
+                    <span style="color:#a78bfa; width:55px; text-align:right;">{bias_str}</span>
+                </div>
+                """
+            st.markdown(f'<div class="log-terminal" style="max-height:160px; margin-top:8px;">{rows_html}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="log-terminal" style="max-height:80px; margin-top:8px;"><div class="log-line" style="color:#334155; text-align:center;">Blackbox flight recorder standing by...</div></div>', unsafe_allow_html=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    render_mission_telemetry_cache()
 
 
 # ==================== RIGHT COLUMN ====================
