@@ -794,7 +794,8 @@ def yolo_loop():
                                             "R": "right",         # Sharp pivot turn at 90deg junction
                                             "STOP": "stop"
                                         }
-                                        gps_cmd = cmd_map.get(gps_cmd, "forward")
+                                        if not gps_cmd.startswith("steer:"):
+                                            gps_cmd = cmd_map.get(gps_cmd, "forward")
                                         
                                         # At intersections, GPS ALWAYS overrides lane following; also let GPS proceed if lane follower has no visual line
                                         if lane_follower.is_intersection or gps_cmd != "forward" or lane_cmd == "stop":
@@ -1014,11 +1015,17 @@ async def get_telemetry_stats():
 
 @app.post("/backend/return_to_base")
 async def trigger_return_to_base():
-    global active_phase, current_route, waypoint_index
+    global active_phase, current_route, waypoint_index, stored_deliver_points
     active_phase = "RETURNING_TO_BASE"
     start_lat = live_location["lat"] if live_location else (destination_location.get("lat") or 0.0)
     start_lng = live_location["lng"] if live_location else (destination_location.get("lng") or 0.0)
-    if charging_station.get("lat") and charging_station.get("lng"):
+    
+    # Priority 1: Retrace the delivery route backwards to the pickup/sender location!
+    if stored_deliver_points and len(stored_deliver_points) > 1:
+        current_route = list(reversed(stored_deliver_points))
+        waypoint_index = 0
+        add_log(f"🏠 Returning to Sender (Pickup) along reversed Google Maps route ({len(current_route)} waypoints)")
+    elif charging_station.get("lat") and charging_station.get("lng"):
         try:
             # Check route cache first
             cached_rtb = telemetry_db.get_cached_route((start_lat, start_lng), (charging_station["lat"], charging_station["lng"]))
@@ -1040,7 +1047,7 @@ async def trigger_return_to_base():
         send_esp32("stop")
     await broadcast_to_dashboard()
     await broadcast_to_tracking()
-    return {"status": "success", "phase": active_phase}
+    return {"status": "success", "phase": active_phase, "waypoints": len(current_route)}
 
 @app.post("/backend/set_routing_engine")
 async def set_routing(req: Request):
@@ -1237,20 +1244,34 @@ async def complete_retrieval(request: Request):
     return {"status": "standby", "message": "3-minute standby started"}
 
 async def standby_timer():
-    global active_phase, current_route, waypoint_index
+    global active_phase, current_route, waypoint_index, stored_deliver_points
     await asyncio.sleep(180)  # 3 minutes
     if active_phase == "STANDBY":
-        active_phase = "RETURNING_TO_BASE"
-        # Fetch route to charging station
-        start_lat = live_location["lat"] if live_location else destination_location["lat"]
-        start_lng = live_location["lng"] if live_location else destination_location["lng"]
-        kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
-        base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
-        
-        routes = fetch_routes(kart_obj, base_obj, base_obj)
-        current_route = routes.get('receive_points', [])
-        waypoint_index = 0
-        add_log(f"⏰ Standby timeout. Returning to base. Route points: {len(current_route)}")
+        auto_return = os.environ.get("AUTO_RETURN_TO_BASE", "false").lower() == "true"
+        if auto_return:
+            active_phase = "RETURNING_TO_BASE"
+            if stored_deliver_points and len(stored_deliver_points) > 1:
+                current_route = list(reversed(stored_deliver_points))
+                waypoint_index = 0
+                add_log(f"⏰ Standby timeout: Auto-returning to Sender (Pickup) along reversed route ({len(current_route)} waypoints)")
+            elif charging_station.get("lat") and charging_station.get("lng"):
+                start_lat = live_location["lat"] if live_location else destination_location["lat"]
+                start_lng = live_location["lng"] if live_location else destination_location["lng"]
+                kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+                base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
+                routes = fetch_routes(kart_obj, base_obj, base_obj)
+                current_route = routes.get('receive_points', [])
+                waypoint_index = 0
+                add_log(f"⏰ Standby timeout: Returning to base. Route points: {len(current_route)}")
+            await broadcast_to_dashboard()
+            await broadcast_to_tracking()
+        else:
+            # Safe default for testing: stay parked safely at destination in IDLE mode
+            active_phase = "IDLE"
+            send_esp32("stop")
+            add_log("⏰ 3-minute standby completed: Cart parked safely at destination in IDLE mode.")
+            await broadcast_to_dashboard()
+            await broadcast_to_tracking()
 
 @app.post("/backend/coordinates/destinations")
 async def get_coordinates(req: Request):
