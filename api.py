@@ -771,8 +771,8 @@ def yolo_loop():
                                     }
                                     gps_cmd = cmd_map.get(gps_cmd, "forward")
                                     
-                                    # At intersections, GPS ALWAYS overrides lane following
-                                    if lane_follower.is_intersection or gps_cmd != "forward":
+                                    # At intersections, GPS ALWAYS overrides lane following; also let GPS proceed if lane follower has no visual line
+                                    if lane_follower.is_intersection or gps_cmd != "forward" or lane_cmd == "stop":
                                         nav_cmd = gps_cmd
                                         junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
                                         nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
@@ -1151,22 +1151,34 @@ async def verify_qr(request: Request):
     cart_qr = body.get("cart_id", "")
     action = body.get("action", "")  # "load" or "retrieve"
     
-    if action == "load" and active_phase == "AWAITING_LOAD":
-        cargo_state = "UNLOCKED"
-        await send_esp32("unlock")
-        return {"status": "unlocked", "message": "Cart unlocked for loading"}
-    elif action == "retrieve" and active_phase == "AWAITING_RETRIEVAL":
-        cargo_state = "UNLOCKED"
-        await send_esp32("unlock")
-        return {"status": "unlocked", "message": "Cart unlocked for retrieval"}
+    cargo_state = "UNLOCKED"
+    send_esp32("unlock")
+    
+    if action == "load":
+        if active_phase == "HEADING_TO_SENDER":
+            active_phase = "AWAITING_LOAD"
+        add_log(f"🔓 Cart unlocked for loading (QR: {cart_qr or 'Manual'})")
+        await broadcast_to_dashboard()
+        await broadcast_to_tracking()
+        return {"status": "unlocked", "action": "load", "phase": active_phase, "message": "Cart unlocked for loading"}
+    elif action == "retrieve":
+        if active_phase == "DELIVERING":
+            active_phase = "AWAITING_RETRIEVAL"
+        add_log(f"🔓 Cart unlocked for retrieval (QR: {cart_qr or 'Manual'})")
+        await broadcast_to_dashboard()
+        await broadcast_to_tracking()
+        return {"status": "unlocked", "action": "retrieve", "phase": active_phase, "message": "Cart unlocked for retrieval"}
     else:
-        return {"status": "error", "message": f"Invalid action for phase {active_phase}"}
+        add_log(f"🔓 Cart bypass unlocked (QR: {cart_qr or 'Manual'})")
+        await broadcast_to_dashboard()
+        await broadcast_to_tracking()
+        return {"status": "unlocked", "action": "unlock", "phase": active_phase, "message": "Cart latch unlocked"}
 
 @app.post("/backend/dispatch")
 async def dispatch_cart(request: Request):
     global active_phase, cargo_state, current_route, waypoint_index, stored_deliver_points
     cargo_state = "LOCKED"
-    await send_esp32("lock")
+    send_esp32("lock")
     
     # Use the Google Maps delivery route
     if stored_deliver_points:
@@ -1194,7 +1206,7 @@ async def dispatch_cart(request: Request):
 async def complete_retrieval(request: Request):
     global active_phase, cargo_state
     cargo_state = "LOCKED"
-    await send_esp32("lock")
+    send_esp32("lock")
     active_phase = "STANDBY"
     asyncio.create_task(standby_timer())
     return {"status": "standby", "message": "3-minute standby started"}
@@ -1447,7 +1459,7 @@ async def broadcast_to_tracking():
         "speed": gps_speed,
         "eta_seconds": eta_seconds,
         "delivery_id": current_delivery_id,
-        "route_points": [{"lat": p["latitude"], "lng": p["longitude"]} for p in current_route] if current_route else []
+        "route_points": [{"lat": p.get("latitude", p.get("lat", 0)), "lng": p.get("longitude", p.get("lng", 0))} for p in current_route if isinstance(p, dict)] if current_route else []
     }
     msg = json.dumps(data)
     dead = set()
