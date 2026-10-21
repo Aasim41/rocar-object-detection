@@ -26,16 +26,30 @@ def angle_difference(desired_bearing, current_bearing):
     return difference
 
 def generate_command(angle_error):
-    if abs(angle_error) <= 10:
+    """
+    Generate proportional differential steering for smooth curve following,
+    reserving hard pivot turns for sharp acute angles (>45 deg).
+    """
+    abs_err = abs(angle_error)
+    if abs_err <= 8:
         return "F"
-    elif 10 < angle_error <= 30:
-        return "SR"
-    elif -30 <= angle_error < -10:
-        return "SL"
-    elif angle_error > 30:
-        return "R"
+    elif abs_err <= 45:
+        # Continuous proportional steering: modulate speed across both tracks
+        # As angle error increases from 8 to 45 deg, bias scales smoothly from 15 to 85 PWM
+        bias = int((abs_err / 45.0) * 85)
+        if angle_error > 0:
+            # Curve Right: Left wheel faster, Right wheel slower
+            l_spd = min(250, 195 + bias // 2)
+            r_spd = max(95, 205 - bias)
+        else:
+            # Curve Left: Left wheel slower, Right wheel faster
+            l_spd = max(95, 205 - bias)
+            r_spd = min(250, 195 + bias // 2)
+        return f"steer:{l_spd}:{r_spd}"
+    elif angle_error > 45:
+        return "R"  # Sharp right junction pivot
     else:
-        return "L"
+        return "L"  # Sharp left junction pivot
 
 def navigate(heading, current_coords, points, waypoint_index=0):
     """
