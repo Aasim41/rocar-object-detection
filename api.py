@@ -757,25 +757,50 @@ def yolo_loop():
                                     gps_cmd = nav_result.get("command", "F")
                                     waypoint_index = nav_result.get("waypoint_index", waypoint_index)
                                     
-                                    wp_total = len(current_route)
-                                    if waypoint_index < wp_total:
-                                        wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
-                                        nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
-                                    
-                                    cmd_map = {
-                                        "F": "forward",
-                                        "SL": "curve_left",   # Smooth proportional curve left
-                                        "SR": "curve_right",  # Smooth proportional curve right
-                                        "L": "left",          # Sharp pivot turn at 90deg junction
-                                        "R": "right"          # Sharp pivot turn at 90deg junction
-                                    }
-                                    gps_cmd = cmd_map.get(gps_cmd, "forward")
-                                    
-                                    # At intersections, GPS ALWAYS overrides lane following; also let GPS proceed if lane follower has no visual line
-                                    if lane_follower.is_intersection or gps_cmd != "forward" or lane_cmd == "stop":
-                                        nav_cmd = gps_cmd
-                                        junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
-                                        nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
+                                    # Check if the progressive waypoint tracker reached the final destination waypoint
+                                    if nav_result.get("route_complete") or gps_cmd == "STOP":
+                                        nav_cmd = "stop"
+                                        send_esp32("stop")
+                                        if active_phase == "HEADING_TO_SENDER":
+                                            nav_msg = "🏪 AT SENDER → WAITING FOR LOAD"
+                                            current_status = nav_msg
+                                            active_phase = "AWAITING_LOAD"
+                                            current_route = []
+                                            waypoint_index = 0
+                                        elif active_phase == "DELIVERING":
+                                            nav_msg = "🎯 DESTINATION REACHED → WAITING FOR RETRIEVAL"
+                                            current_status = nav_msg
+                                            active_phase = "AWAITING_RETRIEVAL"
+                                            current_route = []
+                                            waypoint_index = 0
+                                        elif active_phase == "RETURNING_TO_BASE":
+                                            nav_msg = "🏠 RETURNED TO BASE → IDLE"
+                                            current_status = nav_msg
+                                            add_log("✅ Cart has returned to base!")
+                                            active_phase = "IDLE"
+                                            current_route = []
+                                            waypoint_index = 0
+                                    else:
+                                        wp_total = len(current_route)
+                                        if waypoint_index < wp_total:
+                                            wp_dist = calculate_distance(to_tuple(live_location), to_tuple(current_route[min(waypoint_index, wp_total - 1)]))
+                                            nav_msg = f"GPS WP {waypoint_index+1}/{wp_total} ({wp_dist:.0f}m) → {gps_cmd}"
+                                        
+                                        cmd_map = {
+                                            "F": "forward",
+                                            "SL": "curve_left",   # Smooth proportional curve left
+                                            "SR": "curve_right",  # Smooth proportional curve right
+                                            "L": "left",          # Sharp pivot turn at 90deg junction
+                                            "R": "right",         # Sharp pivot turn at 90deg junction
+                                            "STOP": "stop"
+                                        }
+                                        gps_cmd = cmd_map.get(gps_cmd, "forward")
+                                        
+                                        # At intersections, GPS ALWAYS overrides lane following; also let GPS proceed if lane follower has no visual line
+                                        if lane_follower.is_intersection or gps_cmd != "forward" or lane_cmd == "stop":
+                                            nav_cmd = gps_cmd
+                                            junction_tag = " [JUNCTION]" if lane_follower.is_intersection else ""
+                                            nav_msg = f"GPS Steering: {nav_cmd.upper()} (WP {waypoint_index+1}/{wp_total}){junction_tag}"
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
