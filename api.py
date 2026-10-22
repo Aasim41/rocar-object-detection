@@ -221,7 +221,7 @@ model = YOLO("yolov8n.pt")
 import os
 
 # Camera
-CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "0").strip()
+CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "http://10.205.106.115:8080/video").strip()
 # If it's a digit, treat it as an integer (USB webcam index)
 if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
@@ -257,7 +257,7 @@ bot_socket = None
 is_tcp_bot = False
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
-BOT_WS_URL = os.environ.get("BOT_WS_URL", "ws://192.168.4.1:8765/")
+BOT_WS_URL = os.environ.get("BOT_WS_URL", "tcp://10.205.106.115:8765")
 
 def process_bot_message(msg: str):
     """Process incoming telemetry line from Arduino/ESP32."""
