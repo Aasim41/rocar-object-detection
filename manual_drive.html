@@ -494,11 +494,19 @@
                     </button>
                 </div>
                 <div class="btn-grid-2">
-                    <button class="act-btn blue" onclick="timedDrive('left', 1800)">
-                        🔄 [3] Turn Left (2s) <span class="hotkey-badge">3</span>
+                    <button class="act-btn blue" onclick="timedDrive('left', 2000)">
+                        🔄 [3] Pivot Left (2s) <span class="hotkey-badge">3</span>
                     </button>
-                    <button class="act-btn blue" onclick="timedDrive('right', 1800)">
-                        🔄 [4] Turn Right (2s) <span class="hotkey-badge">4</span>
+                    <button class="act-btn blue" onclick="timedDrive('right', 2000)">
+                        🔄 [4] Pivot Right (2s) <span class="hotkey-badge">4</span>
+                    </button>
+                </div>
+                <div class="btn-grid-2">
+                    <button class="act-btn teal" onclick="timedDrive('curve_left', 2000)">
+                        ↖️ Smooth Curve Left (2s)
+                    </button>
+                    <button class="act-btn teal" onclick="timedDrive('curve_right', 2000)">
+                        ↗️ Smooth Curve Right (2s)
                     </button>
                 </div>
                 <button class="act-btn red" style="font-weight:800;" onclick="sendCmd('stop')">
