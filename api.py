@@ -221,9 +221,25 @@ gps_app_connected = False
 model = YOLO("yolov8n.pt")
 
 import os
+import re
+import subprocess
+
+def get_phone_hotspot_ip():
+    """Auto-detect phone hotspot IP address from network gateway."""
+    try:
+        out = subprocess.check_output("ipconfig", text=True)
+        m = re.findall(r'(?:Default Gateway[.\s:]+)(?:fe80[^\r\n]+\r?\n\s+)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', out)
+        if m:
+            return m[0]
+    except Exception:
+        pass
+    return "10.194.42.199"
+
+AUTO_PHONE_IP = get_phone_hotspot_ip()
+print(f"📡 Auto-detected Phone Hotspot IP: {AUTO_PHONE_IP}")
 
 # Camera
-CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "http://10.205.106.115:8080/video").strip()
+CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", f"http://{AUTO_PHONE_IP}:8080/video").strip()
 # If it's a digit, treat it as an integer (USB webcam index)
 if CAMERA_SOURCE.isdigit():
     CAMERA_SOURCE = int(CAMERA_SOURCE)
@@ -259,7 +275,7 @@ bot_socket = None
 is_tcp_bot = False
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
-BOT_WS_URL = os.environ.get("BOT_WS_URL", "tcp://10.205.106.115:8765")
+BOT_WS_URL = os.environ.get("BOT_WS_URL", f"tcp://{AUTO_PHONE_IP}:8765")
 
 def process_bot_message(msg: str):
     """Process incoming telemetry line from Arduino/ESP32."""
