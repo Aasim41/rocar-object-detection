@@ -185,9 +185,15 @@ async def serial_reader_loop():
 async def background_reconnect_loop():
     """Background monitor to auto-reconnect if USB OTG is plugged in or power-cycled."""
     global arduino_serial
+    warn_counter = 0
     while True:
         if not MOCK_MODE and (arduino_serial is None or not arduino_serial.is_open):
-            try_open_serial()
+            if not try_open_serial():
+                warn_counter += 1
+                if warn_counter % 5 == 1:
+                    print("[RELAY] Scanning for USB OTG Arduino... (Ensure USB OTG is enabled in Android Settings)")
+            else:
+                warn_counter = 0
         await asyncio.sleep(3.0)
 
 
