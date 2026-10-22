@@ -248,23 +248,87 @@ annotated_lock = threading.Lock()
 import queue
 
 # ============================================================
-# Bot Hardware Connection (ESP32 direct or Arduino via Phone Relay)
+# Bot Hardware Connection (ESP32 direct, TCP Bridge, or WebSocket Relay)
 # ============================================================
+import socket
+
 ws = None
+bot_socket = None
+is_tcp_bot = False
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
 BOT_WS_URL = os.environ.get("BOT_WS_URL", "ws://192.168.4.1:8765/")
 
+def process_bot_message(msg: str):
+    """Process incoming telemetry line from Arduino/ESP32."""
+    global obstacle_detected, blocked_until, current_distance_cm, current_status, battery_level, motor_current, robot_temperature
+    global dist_left_cm, dist_center_cm, dist_right_cm
+    
+    msg = msg.strip()
+    if not msg:
+        return
+        
+    if msg == "BLOCKED":
+        obstacle_detected = True
+        blocked_until = time.time() + 1.5
+        current_status = "🚨 OBSTACLE BLOCKED"
+        add_log("🚨 Hardware Reflex: Obstacle within 15cm!")
+        ts = datetime.now().strftime("%H:%M:%S")
+        esp_commands.append(f"[{ts}] RECV: BLOCKED")
+        if len(esp_commands) > 30: esp_commands.pop(0)
+    elif msg.startswith("DIST:"):
+        try:
+            parts = msg.split(":")
+            dist_val = int(parts[1])
+            dir_tag = parts[2] if len(parts) > 2 else "C"
+            
+            # Store in directional slots
+            if dir_tag == "L":
+                dist_left_cm = dist_val
+            elif dir_tag == "R":
+                dist_right_cm = dist_val
+            else:
+                dist_center_cm = dist_val
+                current_distance_cm = dist_val
+                ultrasonic_history.append((time.time(), dist_val))
+            
+            ts = datetime.now().strftime("%H:%M:%S")
+            esp_commands.append(f"[{ts}] RECV: {msg}")
+            if len(esp_commands) > 30: esp_commands.pop(0)
+        except (ValueError, IndexError):
+            pass
+    elif msg.startswith("BAT:"):
+        try:
+            battery_level = int(msg.split(":")[1])
+            ts = datetime.now().strftime("%H:%M:%S")
+            esp_commands.append(f"[{ts}] RECV: {msg}")
+            if len(esp_commands) > 30: esp_commands.pop(0)
+        except ValueError:
+            pass
+    elif msg.startswith("TEMP:"):
+        try:
+            robot_temperature = float(msg.split(":")[1])
+        except ValueError:
+            pass
+    elif msg.startswith("AMP:"):
+        try:
+            motor_current = float(msg.split(":")[1])
+        except ValueError:
+            pass
+
 def esp32_sender_worker():
     """Background thread that consumes the command queue and sends to bot."""
-    global ws, ws_connected
+    global ws, ws_connected, bot_socket, is_tcp_bot
     while True:
         cmd = esp32_cmd_queue.get()
         if cmd is None:
             break
-        if ws_connected and ws is not None:
+        if ws_connected:
             try:
-                ws.send(cmd)
+                if is_tcp_bot and bot_socket:
+                    bot_socket.sendall((cmd + "\n").encode("utf-8"))
+                elif ws is not None:
+                    ws.send(cmd)
             except Exception as e:
                 if ws_connected:
                     ws_connected = False
@@ -272,24 +336,47 @@ def esp32_sender_worker():
         esp32_cmd_queue.task_done()
 
 def connect_esp32():
-    """Connect to Arduino via Phone-Relay WebSocket server."""
-    global ws, ws_connected
-    if not WS_AVAILABLE:
+    """Connect to Arduino via Phone-Relay WebSocket or raw TCP server."""
+    global ws, ws_connected, bot_socket, is_tcp_bot
+    if not BOT_WS_URL:
         return
-    try:
-        ws = websocket.WebSocket()
-        ws.settimeout(2)
-        ws.connect(BOT_WS_URL)
-        ws_connected = True
-        add_log(f"✅ Connected to bot hardware at {BOT_WS_URL}")
-        print(f"✅ Connected to bot hardware at {BOT_WS_URL}")
-    except Exception as e:
-        ws_connected = False
+        
+    url = BOT_WS_URL.strip()
+    if url.startswith("tcp://"):
+        try:
+            clean_url = url.replace("tcp://", "")
+            host, port_str = clean_url.split(":")
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.5)
+            s.connect((host, int(port_str)))
+            bot_socket = s
+            is_tcp_bot = True
+            ws_connected = True
+            add_log(f"✅ Connected to bot hardware via TCP at {url}")
+            print(f"✅ Connected to bot hardware via TCP at {url}")
+        except Exception as e:
+            ws_connected = False
+            bot_socket = None
+    else:
+        if not WS_AVAILABLE:
+            return
+        try:
+            ws_client = websocket.WebSocket()
+            ws_client.settimeout(2)
+            ws_client.connect(url)
+            ws = ws_client
+            is_tcp_bot = False
+            ws_connected = True
+            add_log(f"✅ Connected to bot hardware at {url}")
+            print(f"✅ Connected to bot hardware at {url}")
+        except Exception as e:
+            ws_connected = False
+            ws = None
 
 def esp32_reconnect_worker():
     """Continuous background worker to ensure auto-reconnect to bot hardware."""
     while True:
-        if not ws_connected and WS_AVAILABLE:
+        if not ws_connected and (BOT_WS_URL.startswith("tcp://") or WS_AVAILABLE):
             if esp32_reconnect_lock.acquire(blocking=False):
                 try:
                     connect_esp32()
@@ -298,7 +385,7 @@ def esp32_reconnect_worker():
         time.sleep(3.0)
 
 def send_esp32(cmd: str):
-    """Queue a command to Arduino via WebSocket without blocking the AI loop."""
+    """Queue a command to Arduino via WebSocket/TCP without blocking the AI loop."""
     global ws_connected
     
     # Always log the command intent for the dashboard UI (avoid spam)
@@ -327,63 +414,28 @@ def send_esp32(cmd: str):
 
 def esp32_listener():
     """Background thread to listen for Arduino messages via phone relay."""
-    global obstacle_detected, blocked_until, current_distance_cm, current_status, battery_level, motor_current, robot_temperature
-    global dist_left_cm, dist_center_cm, dist_right_cm
+    global ws_connected, bot_socket, is_tcp_bot, ws
+    tcp_buf = ""
     while True:
-        if ws_connected and ws is not None:
+        if ws_connected:
             try:
-                msg = ws.recv()
-                if msg:
-                    if msg == "BLOCKED":
-                        obstacle_detected = True
-                        blocked_until = time.time() + 1.5
-                        current_status = "🚨 OBSTACLE BLOCKED"
-                        add_log("🚨 Hardware Reflex: Obstacle within 15cm!")
-                        ts = datetime.now().strftime("%H:%M:%S")
-                        esp_commands.append(f"[{ts}] RECV: BLOCKED")
-                        if len(esp_commands) > 30: esp_commands.pop(0)
-                    elif msg.startswith("DIST:"):
-                        try:
-                            parts = msg.split(":")
-                            dist_val = int(parts[1])
-                            dir_tag = parts[2] if len(parts) > 2 else "C"
-                            
-                            # Store in directional slots
-                            if dir_tag == "L":
-                                dist_left_cm = dist_val
-                            elif dir_tag == "R":
-                                dist_right_cm = dist_val
-                            else:
-                                dist_center_cm = dist_val
-                                current_distance_cm = dist_val
-                                ultrasonic_history.append((time.time(), dist_val))
-                            
-                            ts = datetime.now().strftime("%H:%M:%S")
-                            esp_commands.append(f"[{ts}] RECV: {msg}")
-                            if len(esp_commands) > 30: esp_commands.pop(0)
-                        except (ValueError, IndexError):
-                            pass
-                    elif msg.startswith("BAT:"):
-                        try:
-                            battery_level = int(msg.split(":")[1])
-                            ts = datetime.now().strftime("%H:%M:%S")
-                            esp_commands.append(f"[{ts}] RECV: {msg}")
-                            if len(esp_commands) > 30: esp_commands.pop(0)
-                        except ValueError:
-                            pass
-                    elif msg.startswith("TEMP:"):
-                        try:
-                            robot_temperature = float(msg.split(":")[1])
-                        except ValueError:
-                            pass
-                    elif msg.startswith("AMP:"):
-                        try:
-                            motor_current = float(msg.split(":")[1])
-                        except ValueError:
-                            pass
+                if is_tcp_bot and bot_socket:
+                    chunk = bot_socket.recv(1024).decode("utf-8", errors="ignore")
+                    if not chunk:
+                        ws_connected = False
+                        continue
+                    tcp_buf += chunk
+                    while "\n" in tcp_buf:
+                        line, tcp_buf = tcp_buf.split("\n", 1)
+                        process_bot_message(line)
+                elif ws is not None:
+                    msg = ws.recv()
+                    if msg:
+                        process_bot_message(msg)
             except Exception:
-                pass
-        time.sleep(0.05)
+                time.sleep(0.05)
+        else:
+            time.sleep(0.5)
 
 # ============================================================
 # Logging
