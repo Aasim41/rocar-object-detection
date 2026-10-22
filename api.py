@@ -1045,7 +1045,8 @@ async def manual_control(req: ControlRequest):
             content={"status": "ignored", "reason": "Not in manual mode"}
         )
     
-    cmd = req.action.lower()
+    raw = req.action or req.cmd or ""
+    cmd = raw.lower().strip()
     if cmd == "open_lid": cmd = "unlock"
     if cmd == "close_lid": cmd = "lock"
     

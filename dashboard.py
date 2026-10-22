@@ -930,8 +930,13 @@ with col_right:
             </div>
 
             <div class="aux-row">
-                <button class="aux-btn" id="btn-beep">🔊 BEEP HORN</button>
+                <button class="aux-btn" id="btn-beep">🔊 BEEP</button>
                 <button class="aux-btn" id="btn-slow">⚡ SLOW</button>
+            </div>
+            <div class="aux-row" style="margin-top:6px;">
+                <button class="aux-btn" id="btn-scan-l" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">⬅️ SCAN L</button>
+                <button class="aux-btn" id="btn-scan-c" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">⏺️ SCAN C</button>
+                <button class="aux-btn" id="btn-scan-r" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">➡️ SCAN R</button>
             </div>
             <div class="status-line" id="cmd-status">READY: Keys W/A/S/D or Arrows</div>
 
@@ -973,6 +978,9 @@ with col_right:
                 bindBtn("btn-rev", "reverse");
                 bindBtn("btn-beep", "beep");
                 bindBtn("btn-slow", "slow");
+                bindBtn("btn-scan-l", "scan_left");
+                bindBtn("btn-scan-c", "scan_center");
+                bindBtn("btn-scan-r", "scan_right");
 
                 // Keyboard Controls
                 window.addEventListener("keydown", (e) => {{
