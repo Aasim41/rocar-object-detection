@@ -967,8 +967,29 @@ with col_right:
                 function bindBtn(id, cmd) {{
                     const btn = document.getElementById(id);
                     if (!btn) return;
-                    btn.addEventListener("mousedown", (e) => {{ e.preventDefault(); sendCmd(cmd); }});
-                    btn.addEventListener("touchstart", (e) => {{ e.preventDefault(); sendCmd(cmd); }});
+                    let holdInterval = null;
+                    const startAction = (e) => {{
+                        e.preventDefault();
+                        sendCmd(cmd);
+                        if (cmd !== "stop" && cmd !== "beep" && !cmd.startsWith("scan")) {{
+                            if (holdInterval) clearInterval(holdInterval);
+                            holdInterval = setInterval(() => sendCmd(cmd), 300);
+                        }}
+                    }};
+                    const stopAction = (e) => {{
+                        if (holdInterval) {{
+                            clearInterval(holdInterval);
+                            holdInterval = null;
+                        }}
+                        if (cmd !== "stop" && cmd !== "beep" && !cmd.startsWith("scan")) {{
+                            sendCmd("stop");
+                        }}
+                    }};
+                    btn.addEventListener("mousedown", startAction);
+                    btn.addEventListener("mouseup", stopAction);
+                    btn.addEventListener("mouseleave", stopAction);
+                    btn.addEventListener("touchstart", startAction);
+                    btn.addEventListener("touchend", stopAction);
                 }}
 
                 bindBtn("btn-fwd", "forward");
