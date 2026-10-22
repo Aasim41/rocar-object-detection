@@ -99,7 +99,8 @@ class ModeRequest(BaseModel):
     mode: str
 
 class ControlRequest(BaseModel):
-    action: str
+    action: Optional[str] = None
+    cmd: Optional[str] = None
 
 class OrderRequest(BaseModel):
     amount_inr: float
