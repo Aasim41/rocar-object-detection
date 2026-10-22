@@ -39,8 +39,8 @@
 #endif
 
 #define SPEED_FULL   255
-#define SPEED_SLOW   120
-#define SPEED_DRIFT  160
+#define SPEED_SLOW   130
+#define SPEED_DRIFT  255  // 100% full battery torque to break floor friction under weight
 #define MAX_DIST     400
 
 #define WATCHDOG_MS       1500
@@ -170,11 +170,11 @@ void steerDifferential(int leftSpeed, int rightSpeed) {
 }
 
 void curveLeft() {
-  steerDifferential(120, 210);
+  steerDifferential(100, 255);
 }
 
 void curveRight() {
-  steerDifferential(210, 120);
+  steerDifferential(255, 100);
 }
 
 void processCommand(String cmd) {
