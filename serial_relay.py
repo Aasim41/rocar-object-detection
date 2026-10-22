@@ -56,18 +56,19 @@ def find_arduino_port():
         print(f"[RELAY] Found serial candidate(s): {candidates}")
         return candidates[0]
 
-    # Try pyserial list_ports safely (works on Windows/macOS/desktop Linux, fails on Android)
-    try:
-        import serial.tools.list_ports
-        ports = serial.tools.list_ports.comports()
-        for p in ports:
-            desc = (p.description or "").lower()
-            if any(kw in desc for kw in ["arduino", "ch340", "cp210", "ftdi", "usb serial", "acm"]):
-                return p.device
-            if p.device:
-                return p.device
-    except Exception:
-        pass
+    # Try pyserial list_ports safely on desktop OS (never call on Android as it prints enumeration errors)
+    if sys.platform != "android":
+        try:
+            import serial.tools.list_ports
+            ports = serial.tools.list_ports.comports()
+            for p in ports:
+                desc = (p.description or "").lower()
+                if any(kw in desc for kw in ["arduino", "ch340", "cp210", "ftdi", "usb serial", "acm"]):
+                    return p.device
+                if p.device:
+                    return p.device
+        except Exception:
+            pass
 
     return None
 

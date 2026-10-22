@@ -457,6 +457,7 @@ def yolo_loop():
     """Single YOLO loop: runs inference once and caches the annotated frame."""
     global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, annotated_jpeg
     global current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
+    global scan_servo_angle, obstacle_stopped_since, obstacle_creep_active, obstacle_creep_start
     add_log("🤖 YOLO loop started (Low-Latency Mode)")
     last_telemetry_time = 0.0
     last_logged_cmd = ""
