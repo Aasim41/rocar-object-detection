@@ -240,6 +240,20 @@ void processCommand(String cmd) {
       lastMotorChange = now;
     }
   }
+  else if (cmd == "swing_left") {
+    if (isBlocked) return;
+    if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
+      swingLeft();
+      lastMotorChange = now;
+    }
+  }
+  else if (cmd == "swing_right") {
+    if (isBlocked) return;
+    if (now - lastMotorChange >= MIN_CMD_INTERVAL) {
+      swingRight();
+      lastMotorChange = now;
+    }
+  }
   else if (cmd.startsWith("steer:")) {
     if (isBlocked) return;
     if (now - lastMotorChange >= MIN_CMD_INTERVAL) {

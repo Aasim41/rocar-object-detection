@@ -755,11 +755,13 @@
             if(e.repeat) return;
             let k = e.key.toLowerCase();
             
-            // Continuous WASD
+            // Continuous WASD & QE Curves
             if(k === 'w') { activeKey = k; startDrive('forward'); document.getElementById('dpad-forward').classList.add('active'); }
             else if(k === 's') { activeKey = k; startDrive('reverse'); document.getElementById('dpad-reverse').classList.add('active'); }
             else if(k === 'a') { activeKey = k; startDrive('left'); document.getElementById('dpad-left').classList.add('active'); }
             else if(k === 'd') { activeKey = k; startDrive('right'); document.getElementById('dpad-right').classList.add('active'); }
+            else if(k === 'q') { activeKey = k; startDrive('curve_left'); }
+            else if(k === 'e') { activeKey = k; startDrive('curve_right'); }
             else if(k === ' ') { stopDrive(); document.getElementById('dpad-stop').classList.add('active'); }
 
             // Numbered Component Tests (1 to 9, 0, C)
@@ -780,7 +782,7 @@
 
         document.addEventListener('keyup', (e) => {
             let k = e.key.toLowerCase();
-            if(['w', 'a', 's', 'd'].includes(k)) {
+            if(['w', 'a', 's', 'd', 'q', 'e'].includes(k)) {
                 if(activeKey === k) {
                     stopDrive();
                     activeKey = null;
