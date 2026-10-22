@@ -204,6 +204,10 @@ async def heartbeat_loop():
 async def main():
     global SERIAL_PORT, MOCK_MODE
 
+    if websockets is None:
+        print("[RELAY] ERROR: websockets is not installed. Run: pip install websockets")
+        sys.exit(1)
+
     # Parse command-line args if any
     for arg in sys.argv[1:]:
         if arg.lower() in ["--mock", "mock", "-m"]:
