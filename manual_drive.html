@@ -592,24 +592,41 @@
             }
         }
 
-        // Timed Drive Execution (Auto-stops after N ms)
+        // Timed Drive Execution (Auto-stops after N ms, refreshed with 300ms heartbeat)
         let timedTimer = null;
+        let timedInterval = null;
         function timedDrive(action, durationMs) {
             if(timedTimer) clearTimeout(timedTimer);
+            if(timedInterval) clearInterval(timedInterval);
             logToConsole(`STARTING TIMED ${action.toUpperCase()} (${durationMs/1000}s)...`, 'sent');
             sendCmd(action);
+            timedInterval = setInterval(() => {
+                sendCmd(action);
+            }, 300);
             timedTimer = setTimeout(() => {
+                clearInterval(timedInterval);
                 sendCmd('stop');
                 logToConsole(`TIMED ${action.toUpperCase()} COMPLETED (STOPPED).`, 'normal');
             }, durationMs);
         }
 
-        // Continuous Drive Handlers
+        // Continuous Drive Handlers (with 300ms repeat heartbeat while held)
+        let driveInterval = null;
         function startDrive(dir) {
             isDriving = true;
+            if(driveInterval) clearInterval(driveInterval);
             sendCmd(dir);
+            driveInterval = setInterval(() => {
+                if(isDriving) {
+                    sendCmd(dir);
+                }
+            }, 300);
         }
         function stopDrive() {
+            if(driveInterval) {
+                clearInterval(driveInterval);
+                driveInterval = null;
+            }
             if(isDriving) {
                 isDriving = false;
                 sendCmd('stop');
@@ -731,11 +748,11 @@
             let k = e.key.toLowerCase();
             
             // Continuous WASD
-            if(k === 'w') { activeKey = k; sendCmd('forward'); document.getElementById('dpad-forward').classList.add('active'); }
-            else if(k === 's') { activeKey = k; sendCmd('reverse'); document.getElementById('dpad-reverse').classList.add('active'); }
-            else if(k === 'a') { activeKey = k; sendCmd('left'); document.getElementById('dpad-left').classList.add('active'); }
-            else if(k === 'd') { activeKey = k; sendCmd('right'); document.getElementById('dpad-right').classList.add('active'); }
-            else if(k === ' ') { sendCmd('stop'); document.getElementById('dpad-stop').classList.add('active'); }
+            if(k === 'w') { activeKey = k; startDrive('forward'); document.getElementById('dpad-forward').classList.add('active'); }
+            else if(k === 's') { activeKey = k; startDrive('reverse'); document.getElementById('dpad-reverse').classList.add('active'); }
+            else if(k === 'a') { activeKey = k; startDrive('left'); document.getElementById('dpad-left').classList.add('active'); }
+            else if(k === 'd') { activeKey = k; startDrive('right'); document.getElementById('dpad-right').classList.add('active'); }
+            else if(k === ' ') { stopDrive(); document.getElementById('dpad-stop').classList.add('active'); }
 
             // Numbered Component Tests (1 to 9, 0, C)
             else if(k === '1') timedDrive('forward', 2000);
@@ -757,7 +774,7 @@
             let k = e.key.toLowerCase();
             if(['w', 'a', 's', 'd'].includes(k)) {
                 if(activeKey === k) {
-                    sendCmd('stop');
+                    stopDrive();
                     activeKey = null;
                 }
                 document.querySelectorAll('.dbtn').forEach(b => b.classList.remove('active'));
