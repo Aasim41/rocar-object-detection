@@ -266,13 +266,15 @@ annotated_lock = threading.Lock()
 import queue
 
 # ============================================================
-# Bot Hardware Connection (ESP32 direct, TCP Bridge, or WebSocket Relay)
+# Bot Hardware Connection (ESP32 direct, USB Serial, TCP Bridge, or WebSocket Relay)
 # ============================================================
 import socket
 
 ws = None
 bot_socket = None
+bot_serial = None
 is_tcp_bot = False
+is_serial_bot = False
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
 BOT_WS_URL = os.environ.get("BOT_WS_URL", f"tcp://{AUTO_PHONE_IP}:8765")
@@ -336,14 +338,17 @@ def process_bot_message(msg: str):
 
 def esp32_sender_worker():
     """Background thread that consumes the command queue and sends to bot."""
-    global ws, ws_connected, bot_socket, is_tcp_bot
+    global ws, ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
     while True:
         cmd = esp32_cmd_queue.get()
         if cmd is None:
             break
         if ws_connected:
             try:
-                if is_tcp_bot and bot_socket:
+                if is_serial_bot and bot_serial and bot_serial.is_open:
+                    bot_serial.write((cmd + "\n").encode("utf-8"))
+                    bot_serial.flush()
+                elif is_tcp_bot and bot_socket:
                     bot_socket.sendall((cmd + "\n").encode("utf-8"))
                 elif ws is not None:
                     ws.send(cmd)
@@ -354,12 +359,50 @@ def esp32_sender_worker():
         esp32_cmd_queue.task_done()
 
 def connect_esp32():
-    """Connect to Arduino via Phone-Relay WebSocket or raw TCP server."""
-    global ws, ws_connected, bot_socket, is_tcp_bot
+    """Connect to Arduino via Direct USB Serial, Phone-Relay WebSocket, or raw TCP server."""
+    global ws, ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
     if not BOT_WS_URL:
         return
         
     url = BOT_WS_URL.strip()
+
+    # --- Direct USB Serial Mode (Laptop connected to Arduino via USB Cable) ---
+    if url.upper().startswith("COM") or url.startswith("/dev/") or url.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL"):
+        try:
+            import serial
+            import serial.tools.list_ports
+            
+            port_to_use = url
+            if url.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL"):
+                ports = list(serial.tools.list_ports.comports())
+                usb_ports = [p.device for p in ports if "bluetooth" not in p.description.lower()]
+                if usb_ports:
+                    port_to_use = usb_ports[0]
+                elif ports:
+                    port_to_use = ports[0].device
+                else:
+                    return
+
+            s = serial.Serial(port=port_to_use, baudrate=115200, timeout=0.08)
+            time.sleep(1.8)  # Wait for Arduino Uno AVR bootloader reset cycle to complete
+            s.reset_input_buffer()
+            s.reset_output_buffer()
+            
+            bot_serial = s
+            is_serial_bot = True
+            is_tcp_bot = False
+            ws = None
+            ws_connected = True
+            add_log(f"✅ Connected directly to Arduino on USB Serial {port_to_use} (115200 baud)")
+            print(f"✅ Connected directly to Arduino on USB Serial {port_to_use} (115200 baud)")
+            return
+        except Exception as e:
+            ws_connected = False
+            bot_serial = None
+            is_serial_bot = False
+            return
+
+    # --- TCP Socket Mode (TCPUART on Phone) ---
     if url.startswith("tcp://"):
         try:
             clean_url = url.replace("tcp://", "")
@@ -369,6 +412,8 @@ def connect_esp32():
             s.connect((host, int(port_str)))
             bot_socket = s
             is_tcp_bot = True
+            is_serial_bot = False
+            ws = None
             ws_connected = True
             add_log(f"✅ Connected to bot hardware via TCP at {url}")
             print(f"✅ Connected to bot hardware via TCP at {url}")
@@ -376,6 +421,7 @@ def connect_esp32():
             ws_connected = False
             bot_socket = None
     else:
+        # --- WebSocket Relay Mode ---
         if not WS_AVAILABLE:
             return
         try:
@@ -384,6 +430,7 @@ def connect_esp32():
             ws_client.connect(url)
             ws = ws_client
             is_tcp_bot = False
+            is_serial_bot = False
             ws_connected = True
             add_log(f"✅ Connected to bot hardware at {url}")
             print(f"✅ Connected to bot hardware at {url}")
@@ -394,7 +441,7 @@ def connect_esp32():
 def esp32_reconnect_worker():
     """Continuous background worker to ensure auto-reconnect to bot hardware."""
     while True:
-        if not ws_connected and (BOT_WS_URL.startswith("tcp://") or WS_AVAILABLE):
+        if not ws_connected and (BOT_WS_URL.upper().startswith("COM") or BOT_WS_URL.startswith("/dev/") or BOT_WS_URL.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL") or BOT_WS_URL.startswith("tcp://") or WS_AVAILABLE):
             if esp32_reconnect_lock.acquire(blocking=False):
                 try:
                     connect_esp32()
@@ -403,7 +450,7 @@ def esp32_reconnect_worker():
         time.sleep(3.0)
 
 def send_esp32(cmd: str):
-    """Queue a command to Arduino via WebSocket/TCP without blocking the AI loop."""
+    """Queue a command to Arduino via Serial/WebSocket/TCP without blocking the AI loop."""
     global ws_connected
     
     # Always log the command intent for the dashboard UI (avoid spam)
@@ -431,13 +478,19 @@ def send_esp32(cmd: str):
         pass # Drop command if queue is backed up (prevents memory leak)
 
 def esp32_listener():
-    """Background thread to listen for Arduino messages via phone relay."""
-    global ws_connected, bot_socket, is_tcp_bot, ws
+    """Background thread to listen for Arduino messages via Serial or TCP/WebSocket."""
+    global ws_connected, bot_socket, is_tcp_bot, ws, bot_serial, is_serial_bot
     tcp_buf = ""
     while True:
         if ws_connected:
             try:
-                if is_tcp_bot and bot_socket:
+                if is_serial_bot and bot_serial and bot_serial.is_open:
+                    line = bot_serial.readline().decode("utf-8", errors="ignore").strip()
+                    if line:
+                        process_bot_message(line)
+                    else:
+                        time.sleep(0.01)
+                elif is_tcp_bot and bot_socket:
                     chunk = bot_socket.recv(1024).decode("utf-8", errors="ignore")
                     if not chunk:
                         ws_connected = False
@@ -451,6 +504,9 @@ def esp32_listener():
                     if msg:
                         process_bot_message(msg)
             except Exception:
+                time.sleep(0.05)
+        else:
+            time.sleep(0.5)
                 time.sleep(0.05)
         else:
             time.sleep(0.5)
@@ -507,6 +563,18 @@ def camera_loop():
             time.sleep(1.0)
         else:
             # ── Local USB / laptop webcam ──
+            global cap
+            if cap is None or not cap.isOpened():
+                try:
+                    idx = int(CAMERA_SOURCE) if str(CAMERA_SOURCE).isdigit() else 0
+                    temp_c = cv2.VideoCapture(idx)
+                    if temp_c and temp_c.isOpened():
+                        temp_c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        cap = temp_c
+                        add_log(f"📷 Local webcam index {idx} connected!")
+                except Exception:
+                    pass
+
             if cap is not None and cap.isOpened():
                 ret = cap.grab()
                 if ret:
@@ -516,6 +584,8 @@ def camera_loop():
                             frame = cv2.resize(frame, (640, 480))
                         with frame_lock:
                             latest_frame = frame
+                else:
+                    time.sleep(0.05)
             else:
                 time.sleep(1.0)
             time.sleep(0.01)

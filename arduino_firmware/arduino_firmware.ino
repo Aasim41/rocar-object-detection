@@ -170,11 +170,19 @@ void steerDifferential(int leftSpeed, int rightSpeed) {
 }
 
 void curveLeft() {
-  steerDifferential(100, 255);
+  steerDifferential(80, 255);
 }
 
 void curveRight() {
-  steerDifferential(255, 100);
+  steerDifferential(255, 80);
+}
+
+void swingLeft() {
+  steerDifferential(0, 255);
+}
+
+void swingRight() {
+  steerDifferential(255, 0);
 }
 
 void processCommand(String cmd) {
