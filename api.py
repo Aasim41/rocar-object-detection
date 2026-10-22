@@ -1045,7 +1045,15 @@ async def manual_control(req: ControlRequest):
         )
     
     cmd = req.action.lower()
-    if cmd in ["forward", "backward", "reverse", "left", "right", "curve_left", "curve_right", "stop", "lock", "unlock", "beep"] or cmd.startswith("steer:"):
+    if cmd == "open_lid": cmd = "unlock"
+    if cmd == "close_lid": cmd = "lock"
+    
+    allowed = [
+        "forward", "backward", "reverse", "left", "right", "slow",
+        "curve_left", "curve_right", "stop", "lock", "unlock", "beep",
+        "scan_left", "scan_center", "scan_right", "ping"
+    ]
+    if cmd in allowed or cmd.startswith("steer:"):
         send_esp32(cmd)
         if cmd == "lock":
             cargo_state = "LOCKED"
@@ -1053,7 +1061,7 @@ async def manual_control(req: ControlRequest):
             cargo_state = "OPEN"
         add_log(f"Manual override: {cmd.upper()}")
         return {"status": "success", "command": cmd}
-    return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid command"})
+    return JSONResponse(status_code=400, content={"status": "error", "message": f"Invalid command: {cmd}"})
 
 @app.post("/backend/beep")
 async def trigger_beep():

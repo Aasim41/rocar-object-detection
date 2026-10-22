@@ -196,7 +196,21 @@
             <div></div>
         </div>
         
-        <div class="hint">Use W A S D keys on Desktop.<br>Tap and hold on Mobile.</div>
+        <div class="hint">Use W A S D keys on Desktop. Tap and hold on Mobile.</div>
+
+        <!-- Hardware Component Diagnostics -->
+        <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:420px; margin-top:10px;">
+            <button class="btn" style="background:#2563eb; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('unlock')">🔓 Unlock Lid</button>
+            <button class="btn" style="background:#475569; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('lock')">🔒 Lock Lid</button>
+            <button class="btn" style="background:#d97706; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('beep')">🔔 Beep</button>
+            <button class="btn" style="background:#0f766e; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('scan_left')">⬅️ Scan L</button>
+            <button class="btn" style="background:#0f766e; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('scan_center')">⏺️ Scan C</button>
+            <button class="btn" style="background:#0f766e; color:white; padding:8px 12px; font-size:12px;" onclick="sendCmd('scan_right')">➡️ Scan R</button>
+        </div>
+
+        <div id="telemetry-bar" style="font-family:'JetBrains Mono', monospace; font-size:12px; color:#a1a1aa; margin-top:8px;">
+            Sonar: <span id="sonar-val" style="color:#22c55e; font-weight:bold;">-- cm</span> | Status: <span id="stat-val">--</span>
+        </div>
     </div>
 
     <script>
@@ -223,6 +237,15 @@
                     badge.innerText = "AUTO";
                     badge.style.color = "#22c55e";
                 }
+                if (data.distance_cm !== undefined) {
+                    let s = document.getElementById("sonar-val");
+                    if (s) {
+                        s.innerText = (data.distance_cm >= 400 ? "> 400" : data.distance_cm) + " cm";
+                        s.style.color = data.distance_cm < 20 ? "#ef4444" : "#22c55e";
+                    }
+                }
+                let st = document.getElementById("stat-val");
+                if (st && data.status) st.innerText = data.status.substring(0, 25);
             } catch (e) {
                 document.getElementById("status-badge").innerText = "OFFLINE";
             }
