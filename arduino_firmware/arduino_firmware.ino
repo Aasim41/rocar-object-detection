@@ -21,11 +21,15 @@
   // --- Arduino Uno / Nano (AVR) Pin Mapping ---
   #include <Servo.h>
 
+  // Left Motor Driver Logic Pins
   #define IN1 7
   #define IN2 8
+
+  // Right Motor Driver Logic Pins
   #define IN3 11
   #define IN4 12
 
+  // PWM Speed Pins
   #define ENA 5
   #define ENB 6
 
@@ -38,19 +42,20 @@
   #define BUZZER_PIN 2
 #endif
 
+// Speed Calibration (0 to 255)
 #define SPEED_FULL   255
 #define SPEED_SLOW   130
-#define SPEED_DRIFT  255  // 100% full battery torque to break floor friction under weight
+#define SPEED_DRIFT  255  // 100% full battery torque to break floor friction
 #define MAX_DIST     400
 
-#define WATCHDOG_MS       1500
-#define DEADTIME_MS       50
-#define MIN_CMD_INTERVAL  30
+#define WATCHDOG_MS        1500
+#define DEADTIME_MS        50
+#define MIN_CMD_INTERVAL   30
 #define BLOCKED_LOCKOUT_MS 500
 
 #define SCAN_ANGLE_LEFT    45
 #define SCAN_ANGLE_CENTER  90
-#define SCAN_ANGLE_RIGHT  135
+#define SCAN_ANGLE_RIGHT   135
 #define SERVO_SETTLE_MS    200
 
 Servo cargoServo;
@@ -144,6 +149,7 @@ void driveReverse() {
   currentDirection = -1;
 }
 
+// Stationary Pivot Turn Left
 void turnLeft() {
   safeDirectionChange(2);
   digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
@@ -152,6 +158,7 @@ void turnLeft() {
   currentDirection = 2;
 }
 
+// Stationary Pivot Turn Right
 void turnRight() {
   safeDirectionChange(-2);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
@@ -160,7 +167,7 @@ void turnRight() {
   currentDirection = -2;
 }
 
-// Proportional Differential Steering: Both tracks move forward at different speeds for smooth curving
+// Proportional Differential Steering (Rolling Curves)
 void steerDifferential(int leftSpeed, int rightSpeed) {
   safeDirectionChange(1);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
@@ -169,18 +176,22 @@ void steerDifferential(int leftSpeed, int rightSpeed) {
   currentDirection = 1;
 }
 
+// Rolling Curve Left (Inner track 80, Outer track 255)
 void curveLeft() {
   steerDifferential(80, 255);
 }
 
+// Rolling Curve Right (Outer track 255, Inner track 80)
 void curveRight() {
   steerDifferential(255, 80);
 }
 
+// Swing Left (Left track 0, Right track 255)
 void swingLeft() {
   steerDifferential(0, 255);
 }
 
+// Swing Right (Left track 255, Right track 0)
 void swingRight() {
   steerDifferential(255, 0);
 }
