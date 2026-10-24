@@ -614,6 +614,7 @@ def yolo_loop():
     global current_status, obstacle_detected, prev_area_ratio, current_distance_cm, annotated_frame, annotated_jpeg
     global current_route, destination_location, source_location, active_phase, cargo_state, waypoint_index
     global scan_servo_angle, obstacle_stopped_since, obstacle_creep_active, obstacle_creep_start
+    global detour_active, detour_dir, detour_start_time, last_detour_sweep
     add_log("🤖 YOLO loop started (Low-Latency Mode)")
     last_telemetry_time = 0.0
     last_logged_cmd = ""
@@ -654,6 +655,32 @@ def yolo_loop():
             
             # Only do navigation logic in autonomous mode
             if current_mode == "autonomous":
+                # ── 1. ACTIVE DETOUR IN-FLIGHT EXECUTION ──
+                if detour_active:
+                    dt = time.time() - detour_start_time
+                    if dt < 1.6:
+                        send_esp32(detour_dir)
+                        current_status = f"↪️ ACTIVE DETOUR ({detour_dir.upper()}) — Bypassing ({dt:.1f}s)"
+                        time.sleep(0.04)
+                        continue
+                    else:
+                        # Detour curve burst complete, check if center obstacle is cleared
+                        if dist_center_cm > 55:
+                            detour_active = False
+                            detour_dir = None
+                            send_esp32("forward")
+                            current_status = "✅ DETOUR CLEAR — Obstacle cleared, resuming path"
+                            add_log("Detour maneuver complete. Route resumed.")
+                        else:
+                            if dt < 2.8:
+                                send_esp32(detour_dir)
+                                current_status = f"↪️ EXTENDING DETOUR ({detour_dir.upper()})..."
+                                time.sleep(0.04)
+                                continue
+                            else:
+                                detour_active = False
+                                detour_dir = None
+
                 height, width, _ = frame.shape
                 frame_area = height * width
                 boxes = results[0].boxes
@@ -827,33 +854,68 @@ def yolo_loop():
                     
                     else:
                         obstacle_detected = True
-                        if obstacle_stopped_since is None:
-                            obstacle_stopped_since = time.time()
+                        now_t = time.time()
                         
-                        stop_duration = time.time() - obstacle_stopped_since
-                        if obstacle_creep_active:
-                            if time.time() - obstacle_creep_start > OBSTACLE_CREEP_DURATION:
-                                obstacle_creep_active = False
-                                obstacle_stopped_since = time.time()
-                                current_status = f"🛑 Re-checking {closest_name}..."
-                                send_esp32("stop")
-                            else:
-                                current_status = f"🐢 Creeping past {closest_name}..."
-                                send_esp32("slow")
-                        elif stop_duration > OBSTACLE_STOP_TIMEOUT:
-                            obstacle_creep_active = True
-                            obstacle_creep_start = time.time()
-                            current_status = f"🐢 Creeping past {closest_name}..."
-                            add_log(f"Creeping after {OBSTACLE_STOP_TIMEOUT:.0f}s wait")
-                            send_esp32("slow")
+                        # Trigger Active Ultrasonic Radar Sweep
+                        if now_t - last_detour_sweep > 3.0:
+                            send_esp32("sweep")
+                            last_detour_sweep = now_t
+                            current_status = f"🎯 SCANNING RADAR — Sweeping Left & Right for Detour..."
+                            add_log(f"Blocked by {closest_name}: Sweeping scanner servo to find bypass.")
+                        
+                        # Evaluate Left vs Right clearance for active bypass
+                        if dist_left_cm >= 55 and (dist_left_cm >= dist_right_cm or dist_right_cm < 45):
+                            detour_active = True
+                            detour_dir = "curve_left"
+                            detour_start_time = now_t
+                            send_esp32("curve_left")
+                            current_status = f"↪️ DETOUR LEFT (L:{dist_left_cm}cm vs R:{dist_right_cm}cm)"
+                            add_log(f"Active Detour: Left is clear ({dist_left_cm}cm) -> Steering curve_left")
+                        elif dist_right_cm >= 55 and (dist_right_cm > dist_left_cm or dist_left_cm < 45):
+                            detour_active = True
+                            detour_dir = "curve_right"
+                            detour_start_time = now_t
+                            send_esp32("curve_right")
+                            current_status = f"↪️ DETOUR RIGHT (R:{dist_right_cm}cm vs L:{dist_left_cm}cm)"
+                            add_log(f"Active Detour: Right is clear ({dist_right_cm}cm) -> Steering curve_right")
                         else:
-                            remaining = int(OBSTACLE_STOP_TIMEOUT - stop_duration)
-                            current_status = f"🛑 Blocked by {closest_name} ({dist_cm}cm) — creep in {remaining}s"
+                            current_status = f"🛑 BLOCKED by {closest_name} (L:{dist_left_cm}cm | C:{dist_cm}cm | R:{dist_right_cm}cm)"
                             send_esp32("stop")
                 
                 else:
                     obstacle_stopped_since = None
                     obstacle_creep_active = False
+                    
+                    # ── Ultrasonic Blindspot Obstacle Check ──
+                    if dist_center_cm <= 38:
+                        obstacle_detected = True
+                        now_t = time.time()
+                        if now_t - last_detour_sweep > 3.0:
+                            send_esp32("sweep")
+                            last_detour_sweep = now_t
+                            current_status = f"🎯 BLINDSPOT OBSTACLE ({dist_center_cm}cm) — Sweeping for Detour..."
+                            add_log(f"Obstacle in path ({dist_center_cm}cm): Sweeping scanner servo.")
+                        
+                        if dist_left_cm >= 55 and (dist_left_cm >= dist_right_cm or dist_right_cm < 45):
+                            detour_active = True
+                            detour_dir = "curve_left"
+                            detour_start_time = now_t
+                            send_esp32("curve_left")
+                            current_status = f"↪️ DETOUR LEFT (Clearance: {dist_left_cm}cm)"
+                            add_log("Bypassing blindspot obstacle via curve_left")
+                            continue
+                        elif dist_right_cm >= 55 and (dist_right_cm > dist_left_cm or dist_left_cm < 45):
+                            detour_active = True
+                            detour_dir = "curve_right"
+                            detour_start_time = now_t
+                            send_esp32("curve_right")
+                            current_status = f"↪️ DETOUR RIGHT (Clearance: {dist_right_cm}cm)"
+                            add_log("Bypassing blindspot obstacle via curve_right")
+                            continue
+                        else:
+                            current_status = f"🛑 ULTRASONIC STOP ({dist_center_cm}cm) — Path Blocked"
+                            send_esp32("stop")
+                            continue
                     
                     if active_phase in ["IDLE", "AWAITING_LOAD", "AWAITING_RETRIEVAL", "STANDBY"]:
                         send_esp32("stop")
@@ -962,13 +1024,23 @@ def yolo_loop():
                         except Exception as e:
                             print(f"Navigation error: {e}")
                             
-                    if current_status != f"✅ PATH CLEAR → {nav_cmd.upper()}":
-                        add_log(f"✅ {nav_msg}")
-                    current_status = f"✅ PATH CLEAR → {nav_cmd.upper()}"
-                    current_distance_cm = 999
+                    if dist_center_cm < 400:
+                        current_distance_cm = dist_center_cm
+
+                    # ── Proportional Braking (Smart Distance Slowdown) ──
+                    if 18 < dist_center_cm <= 65 and nav_cmd == "forward":
+                        nav_cmd = "slow"
+                        current_status = f"🟡 PROPORTIONAL BRAKE ({dist_center_cm}cm) — Decelerating to SLOW"
+                    elif dist_center_cm <= 18 and nav_cmd in ("forward", "slow"):
+                        nav_cmd = "stop"
+                        current_status = f"🛑 PROXIMITY STOP ({dist_center_cm}cm)"
+                    else:
+                        if current_status != f"✅ PATH CLEAR → {nav_cmd.upper()}":
+                            add_log(f"✅ {nav_msg}")
+                        current_status = f"✅ PATH CLEAR → {nav_cmd.upper()}"
                     
                     # ── BLOCKED lockout: don't override Arduino's emergency stop ──
-                    if time.time() < blocked_until and nav_cmd in ("forward", "slow"):
+                    if (time.time() < blocked_until or dist_center_cm <= 18) and nav_cmd in ("forward", "slow"):
                         send_esp32("stop")
                         current_status = "🚨 BLOCKED LOCKOUT — waiting for clearance"
                     else:
