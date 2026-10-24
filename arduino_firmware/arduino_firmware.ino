@@ -66,6 +66,8 @@ unsigned long lastMotorChange = 0;
 unsigned long lastDistSend = 0;
 unsigned long blockedUntil = 0;
 int currentDirection = 0;
+int targetForwardSpeed = SPEED_FULL;
+unsigned long lastBeepTime = 0;
 
 int currentScanAngle = SCAN_ANGLE_CENTER;
 unsigned long lastScanMove = 0;
@@ -129,6 +131,7 @@ void driveForward() {
   safeDirectionChange(1);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  targetForwardSpeed = SPEED_FULL;
   setMotorSpeed(SPEED_FULL, SPEED_FULL);
   currentDirection = 1;
 }
@@ -137,6 +140,7 @@ void driveForwardSlow() {
   safeDirectionChange(1);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  targetForwardSpeed = SPEED_SLOW;
   setMotorSpeed(SPEED_SLOW, SPEED_SLOW);
   currentDirection = 1;
 }
@@ -314,6 +318,24 @@ void processCommand(String cmd) {
     lastScanMove = millis();
     scanSettled = false;
   }
+  else if (cmd == "sweep") {
+    // Active Obstacle Detour Sweep: Measures Left, Right, and Center
+    stopMotors();
+    scanServo.write(SCAN_ANGLE_LEFT);
+    delay(220);
+    int dL = measureDistance();
+    
+    scanServo.write(SCAN_ANGLE_RIGHT);
+    delay(280);
+    int dR = measureDistance();
+    
+    scanServo.write(SCAN_ANGLE_CENTER);
+    currentScanAngle = SCAN_ANGLE_CENTER;
+    delay(180);
+    int dC = measureDistance();
+    
+    Serial.println("SWEEP:" + String(dL) + ":" + String(dC) + ":" + String(dR));
+  }
   else if (cmd == "beep") {
     beepWarning();
   }
@@ -388,15 +410,27 @@ void loop() {
     String dirTag = (currentScanAngle <= 60) ? "L" : (currentScanAngle >= 120 ? "R" : "C");
     Serial.println("DIST:" + String(dist) + ":" + dirTag);
     
-    if (dist < 15 && dirTag == "C") {
+    if (dist < 18 && dirTag == "C") {
       stopMotors();
       blockedUntil = millis() + BLOCKED_LOCKOUT_MS;
       Serial.println("BLOCKED");
       beepWarning();
-    } else if (dist < 100 && dirTag == "C") {
-      digitalWrite(BUZZER_PIN, HIGH);
-      delay(20);
-      digitalWrite(BUZZER_PIN, LOW);
+    } else if (dist <= 65 && dirTag == "C" && currentDirection == 1) {
+      // Proportional Braking: scale speed down smoothly from target down to 85 PWM crawl
+      int minCrawlSpeed = 85;
+      int propSpeed = map(dist, 18, 65, minCrawlSpeed, targetForwardSpeed);
+      propSpeed = constrain(propSpeed, minCrawlSpeed, targetForwardSpeed);
+      setMotorSpeed(propSpeed, propSpeed);
+      
+      // Dynamic warning beep rate increases as obstacle closes in
+      if (dist < 35 && (millis() - lastBeepTime > ((unsigned long)dist * 18))) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(12);
+        digitalWrite(BUZZER_PIN, LOW);
+        lastBeepTime = millis();
+      }
+    } else if (dist > 65 && dirTag == "C" && currentDirection == 1) {
+      setMotorSpeed(targetForwardSpeed, targetForwardSpeed);
     }
   }
 }
