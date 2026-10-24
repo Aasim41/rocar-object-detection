@@ -614,7 +614,7 @@
             timedTimer = setTimeout(() => {
                 clearInterval(timedInterval);
                 sendCmd('stop');
-                logToConsole(`TIMED ${action.toUpperCase()} COMPLETED (STOPPED).`, 'normal');
+                logToConsole(`TIMED ${action.toUpperCase()} COMPLETED (STOPPED).`, 'normal'); 
             }, durationMs);
         }
 
