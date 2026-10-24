@@ -206,6 +206,12 @@ obstacle_creep_start = None
 OBSTACLE_STOP_TIMEOUT = 8.0
 OBSTACLE_CREEP_DURATION = 1.0
 
+# Active Detour State (Ultrasonic Scanner Sweep Bypass)
+detour_active = False
+detour_dir = None
+detour_start_time = 0.0
+last_detour_sweep = 0.0
+
 # Directional Distance (from scanning servo ultrasonic)
 dist_left_cm = 999    # last reading from left scan
 dist_center_cm = 999  # last reading from center scan (default)
@@ -312,6 +318,19 @@ def process_bot_message(msg: str):
                 current_distance_cm = dist_val
                 ultrasonic_history.append((time.time(), dist_val))
             
+            ts = datetime.now().strftime("%H:%M:%S")
+            esp_commands.append(f"[{ts}] RECV: {msg}")
+            if len(esp_commands) > 30: esp_commands.pop(0)
+        except (ValueError, IndexError):
+            pass
+    elif msg.startswith("SWEEP:"):
+        try:
+            parts = msg.split(":")
+            dist_left_cm = int(parts[1])
+            dist_center_cm = int(parts[2])
+            dist_right_cm = int(parts[3])
+            current_distance_cm = dist_center_cm
+            add_log(f"🎯 Radar Sweep: Left={dist_left_cm}cm, Center={dist_center_cm}cm, Right={dist_right_cm}cm")
             ts = datetime.now().strftime("%H:%M:%S")
             esp_commands.append(f"[{ts}] RECV: {msg}")
             if len(esp_commands) > 30: esp_commands.pop(0)
