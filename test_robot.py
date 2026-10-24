@@ -55,6 +55,9 @@ def handle_line(line):
         last_distance = f"{parts[1]} cm (Dir: {dir_t})"
     elif line == "BLOCKED":
         print("\n🚨 [ALERT] Sensor Reflex Triggered: BLOCKED (<15cm)!")
+    elif line.startswith("SWEEP:"):
+        parts = line.split(":")
+        print(f"\n🎯 [RADAR SWEEP RESULTS]: Left={parts[1]}cm | Center={parts[2]}cm | Right={parts[3]}cm")
     elif "ACK:" in line:
         print(f"\n[ARDUINO ACK]: {line}")
     elif line == "READY":
@@ -189,6 +192,7 @@ def main():
         print(" [6] 🔓 Cargo Latch: UNLOCK (Open Lid)")
         print(" [7] 🔒 Cargo Latch: LOCK (Close Lid)")
         print(" [8] 🎯 Scanning Servo: Left -> Center -> Right")
+        print(" [S] 📡 Active Radar Sweep (L/C/R Detour Test)")
         print(" [9] 📡 Ultrasonic Sensor: Live Distance Stream")
         print(" [0] 🔔 Buzzer Test")
         print(" [C] 📷 Test Local Webcam (Index 0)")
@@ -231,6 +235,10 @@ def main():
             time.sleep(0.8)
             print("🎯 Sweeping scanning servo: CENTER (90°)...")
             send_command("scan_center")
+        elif choice == "S":
+            print("🎯 Commanding active radar sweep...")
+            send_command("sweep")
+            time.sleep(1.0)
         elif choice == "9":
             continuous_distance_monitor()
         elif choice == "0":
