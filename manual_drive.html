@@ -657,13 +657,8 @@
 
         // Ultrasonic Scanner Sweep
         async function triggerSweep() {
-            logToConsole("TRIGGERING SCANNER SWEEP: LEFT -> RIGHT -> CENTER...", 'sent');
-            sendCmd('scan_left');
-            await new Promise(r => setTimeout(r, 900));
-            sendCmd('scan_right');
-            await new Promise(r => setTimeout(r, 900));
-            sendCmd('scan_center');
-            logToConsole("SCANNER SWEEP COMPLETED.", 'normal');
+            logToConsole("TRIGGERING RADAR SWEEP: Measuring Left, Right, Center...", 'sent');
+            sendCmd('sweep');
         }
 
         // Camera Refresh
