@@ -439,6 +439,28 @@ def connect_esp32():
         except Exception as e:
             ws_connected = False
             bot_socket = None
+            # Fallback: check if an Arduino USB serial port is plugged in!
+            try:
+                import serial
+                import serial.tools.list_ports
+                ports = list(serial.tools.list_ports.comports())
+                usb_ports = [p.device for p in ports if "bluetooth" not in p.description.lower()]
+                if usb_ports:
+                    port_to_use = usb_ports[0]
+                    s = serial.Serial(port=port_to_use, baudrate=115200, timeout=0.08)
+                    time.sleep(1.8)
+                    s.reset_input_buffer()
+                    s.reset_output_buffer()
+                    bot_serial = s
+                    is_serial_bot = True
+                    is_tcp_bot = False
+                    ws = None
+                    ws_connected = True
+                    add_log(f"✅ Auto-switched to USB Serial on {port_to_use}")
+                    print(f"✅ Auto-switched to USB Serial on {port_to_use}")
+                    return
+            except Exception:
+                pass
     else:
         # --- WebSocket Relay Mode ---
         if not WS_AVAILABLE:
@@ -1213,12 +1235,15 @@ async def set_mode(req: ModeRequest):
 
 @app.post("/backend/manual_control")
 async def manual_control(req: ControlRequest):
-    global cargo_state
+    global cargo_state, current_mode
     if current_mode != "manual":
-        return JSONResponse(
-            status_code=400, 
-            content={"status": "ignored", "reason": "Not in manual mode"}
-        )
+        current_mode = "manual"
+        while not esp32_cmd_queue.empty():
+            try:
+                esp32_cmd_queue.get_nowait()
+            except queue.Empty:
+                break
+        add_log("🎮 Switched to MANUAL mode from controller input")
     
     raw = req.action or req.cmd or ""
     cmd = raw.lower().strip()
@@ -1227,7 +1252,8 @@ async def manual_control(req: ControlRequest):
     
     allowed = [
         "forward", "backward", "reverse", "left", "right", "slow",
-        "curve_left", "curve_right", "stop", "lock", "unlock", "beep",
+        "curve_left", "curve_right", "swing_left", "swing_right", "sweep",
+        "stop", "lock", "unlock", "beep",
         "scan_left", "scan_center", "scan_right", "ping"
     ]
     if cmd in allowed or cmd.startswith("steer:"):
@@ -1237,7 +1263,7 @@ async def manual_control(req: ControlRequest):
         elif cmd == "unlock":
             cargo_state = "OPEN"
         add_log(f"Manual override: {cmd.upper()}")
-        return {"status": "success", "command": cmd}
+        return {"status": "success", "command": cmd, "mode": current_mode}
     return JSONResponse(status_code=400, content={"status": "error", "message": f"Invalid command: {cmd}"})
 
 @app.post("/backend/beep")

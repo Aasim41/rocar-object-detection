@@ -568,10 +568,28 @@
     </div>
 
     <script>
-        const host = window.location.origin;
+        const host = (window.location.protocol.startsWith("http")) 
+            ? window.location.origin 
+            : "http://localhost:8000";
         let currentMode = "manual";
         let isDriving = false;
         let activeKey = null;
+
+        // Auto-switch backend to manual mode on startup
+        window.addEventListener('DOMContentLoaded', () => {
+            fetch(host + "/set_mode", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({mode: "manual"})
+            }).then(() => {
+                currentMode = "manual";
+                updateModeBadge();
+                logToConsole("Mode synced: MANUAL OVERRIDE active.", 'normal');
+            }).catch(()=>{});
+
+            let img = document.getElementById('camera-stream');
+            if(img) img.src = host + "/video_feed";
+        });
 
         function logToConsole(text, type='normal') {
             const box = document.getElementById('console-stream');
@@ -664,7 +682,7 @@
         // Camera Refresh
         function reloadCamera() {
             let img = document.getElementById('camera-stream');
-            img.src = "/video_feed?t=" + new Date().getTime();
+            img.src = host + "/video_feed?t=" + new Date().getTime();
             logToConsole("Camera feed reloaded.", 'normal');
         }
 
