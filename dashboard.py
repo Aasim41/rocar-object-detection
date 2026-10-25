@@ -1026,27 +1026,58 @@ with col_right:
         st.markdown(f'<a href="{BACKEND_URL}/drive" target="_blank" style="display:block; width:100%; text-align:center; background:rgba(255, 255, 255, 0.05); border:1px solid rgba(255, 255, 255, 0.1); color:#94a3b8; padding:8px; border-radius:8px; font-size:11px; font-weight:600; text-decoration:none; font-family:Inter; margin-top:4px;">↗ POP OUT STANDALONE DRIVE PAD</a>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- CARGO LATCH (static, no auto-refresh) ---
+    # --- CARGO LATCH & SCANNABLE QR PASS ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">CARGO LATCH</div>', unsafe_allow_html=True)
-    c_lock, c_unlock = st.columns(2)
-    with c_lock:
-        if st.button("🔒 LOCK", key="lock"):
+    st.markdown('<div class="panel-label">CARGO LATCH & SCANNABLE QR PASS</div>', unsafe_allow_html=True)
+    
+    cargo_status = s.get("cargo_state", "LOCKED")
+    is_unlocked = cargo_status == "UNLOCKED"
+    
+    qr_endpoint = f"{BACKEND_URL}/backend/verify_qr?cart_id=CART_01&action=unlock"
+    qr_img_src = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={qr_endpoint}&bgcolor=18-18-24&color=4ade80"
+    
+    col_qr, col_latch_act = st.columns([1, 1], gap="medium")
+    with col_qr:
+        st.markdown(f"""
+        <div style="text-align: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; position: relative;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38bdf8; margin-bottom: 8px; font-weight: 600; letter-spacing: 0.5px;">📱 SCAN TO UNLOCK SERVO</div>
+            <div style="position: relative; display: inline-block; border-radius: 12px; overflow: hidden; border: 2px solid #22c55e; box-shadow: 0 0 20px rgba(34, 197, 94, 0.25);">
+                <img src="{qr_img_src}" alt="Scan QR to Unlock" style="display: block; width: 135px; height: 135px;" />
+            </div>
+            <div style="font-size: 9px; color: #94a3b8; margin-top: 8px; font-family: Inter;">Point any mobile camera to open lid (90°)</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col_latch_act:
+        state_badge = '<span style="color:#4ade80; font-weight:bold; font-size:14px;">🔓 UNLOCKED (90°)</span>' if is_unlocked else '<span style="color:#ef4444; font-weight:bold; font-size:14px;">🔒 LOCKED (0°)</span>'
+        st.markdown(f"""
+        <div style="padding: 4px 0 10px 0;">
+            <div style="font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono';">LATCH HARDWARE STATE:</div>
+            <div style="margin: 4px 0 12px 0;">{state_badge}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("🔓 UNLOCK LATCH (90°)", key="btn_unlock_servo", use_container_width=True):
+            try:
+                requests.post(f"{BACKEND_URL}/backend/verify_qr", json={"action": "unlock", "cart_id": "CART_01"}, timeout=3)
+                st.toast("🔓 Latch servo rotated to 90° (Unlocked)!", icon="🔓")
+            except Exception as e:
+                st.error(f"Error: {e}")
+            st.rerun()
+            
+        if st.button("🔒 LOCK LATCH (0°)", key="btn_lock_servo", use_container_width=True):
             try:
                 requests.post(f"{BACKEND_URL}/backend/pack_order", timeout=3)
-            except Exception:
-                st.error("⚠️ Lock command failed")
-    with c_unlock:
-        if st.button("🔓 UNLOCK", key="unlock"):
-            try:
-                requests.post(f"{BACKEND_URL}/backend/unlock", json={"action": "unlock"}, timeout=3)
-            except Exception:
-                st.error("⚠️ Unlock command failed")
+                st.toast("🔒 Latch servo secured to 0° (Locked)!", icon="🔒")
+            except Exception as e:
+                st.error(f"Error: {e}")
+            st.rerun()
+            
     st.markdown('</div>', unsafe_allow_html=True)
 
     # --- SATELLITE & CYBER DARK TRACKING MAP ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">LIVE SATELLITE & ROUTE TRACKING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">LIVE SATELLITE & MISSION ROUTE TRACKING</div>', unsafe_allow_html=True)
     
     GMAPS_API_KEY = os.environ.get("GMAPS_API_KEY", "AIzaSyBX0xNBFK24V2DZgMQHFku3tWcJWtVjgds")
     
@@ -1056,7 +1087,7 @@ with col_right:
     <head>
         <style>
             * {{ box-sizing: border-box; }}
-            #map-wrapper {{ position: relative; width: 100%; height: 360px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }}
+            #map-wrapper {{ position: relative; width: 100%; height: 380px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }}
             #map {{ height: 100%; width: 100%; }}
             .map-ctrl-bar {{
                 position: absolute;
@@ -1065,8 +1096,8 @@ with col_right:
                 z-index: 10;
                 display: flex;
                 gap: 6px;
-                background: rgba(10, 10, 15, 0.8);
-                backdrop-filter: blur(10px);
+                background: rgba(10, 10, 15, 0.85);
+                backdrop-filter: blur(12px);
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 8px;
                 padding: 4px;
@@ -1087,7 +1118,34 @@ with col_right:
                 background: #3b82f6;
                 color: #ffffff;
             }}
+            .phase-hud {{
+                position: absolute;
+                bottom: 12px;
+                left: 12px;
+                z-index: 10;
+                background: rgba(10, 10, 15, 0.85);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 11px;
+                color: #38bdf8;
+                font-weight: 600;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            .hud-dot {{
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                background: #22c55e;
+                box-shadow: 0 0 8px #22c55e;
+            }}
         </style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
         <script>
             (g=>{{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={{}});var d=b.maps||(b.maps={{}}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${{c}}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))}})({{
                 key: "{GMAPS_API_KEY}",
@@ -1101,11 +1159,15 @@ with col_right:
                 <button class="map-type-btn active" id="btn-dark" onclick="setMode('dark')">Dark Cyber</button>
                 <button class="map-type-btn" id="btn-sat" onclick="setMode('hybrid')">Satellite</button>
             </div>
+            <div class="phase-hud" id="phase-hud">
+                <span class="hud-dot" id="hud-dot"></span>
+                <span id="hud-text">PHASE: IDLE (DOCKED)</span>
+            </div>
             <div id="map"></div>
         </div>
 
         <script>
-            let map, botMarker, sourceMarker, destMarker, routePoly;
+            let map, botMarker, chargingMarker, sourceMarker, destMarker, routePoly;
             
             const darkMapStyles = [
                 {{ elementType: 'geometry', stylers: [{{ color: '#18181b' }}] }},
@@ -1157,6 +1219,20 @@ with col_right:
                     title: "AutoDrop Cart"
                 }});
 
+                // Charging Station (Base Dock) Cyan Marker
+                chargingMarker = new google.maps.Marker({{
+                    map: map,
+                    icon: {{
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 9,
+                        fillColor: '#06b6d4', // Cyan
+                        fillOpacity: 1,
+                        strokeColor: '#083344',
+                        strokeWeight: 3,
+                    }},
+                    title: "Charging Station (Base Dock)"
+                }});
+
                 // Source (Pickup) Circle Marker - Matches Mobile App
                 sourceMarker = new google.maps.Marker({{
                     map: map,
@@ -1185,11 +1261,11 @@ with col_right:
                     title: "Dropoff Location"
                 }});
                 
-                // Blue Route Polyline - Matches Mobile App
+                // Route Polyline - Dense Google Maps Path
                 routePoly = new google.maps.Polyline({{
                     geodesic: true,
                     strokeColor: '#3b82f6',
-                    strokeOpacity: 0.85,
+                    strokeOpacity: 0.9,
                     strokeWeight: 5,
                     map: map,
                 }});
@@ -1209,6 +1285,20 @@ with col_right:
                         const bounds = new google.maps.LatLngBounds();
                         let hasBounds = false;
                         
+                        // Update Phase HUD with GSAP pulse
+                        if (data.phase) {{
+                            const hudEl = document.getElementById('hud-text');
+                            if (hudEl && hudEl.innerText !== "PHASE: " + data.phase) {{
+                                hudEl.innerText = "PHASE: " + data.phase;
+                                if (window.gsap) {{
+                                    gsap.fromTo('#phase-hud', 
+                                        {{ scale: 0.92, borderColor: '#38bdf8' }}, 
+                                        {{ scale: 1.0, borderColor: 'rgba(255, 255, 255, 0.15)', duration: 0.45, ease: "back.out(2)" }}
+                                    );
+                                }}
+                            }}
+                        }}
+                        
                         if (data.cart) {{
                             const curr = botMarker.getPosition();
                             if (curr) {{
@@ -1226,7 +1316,16 @@ with col_right:
                             hasBounds = true;
                         }}
                         
-                        if (data.source) {{
+                        if (data.charging_station && data.charging_station.lat) {{
+                            chargingMarker.setPosition(data.charging_station);
+                            chargingMarker.setMap(map);
+                            bounds.extend(data.charging_station);
+                            hasBounds = true;
+                        }} else {{
+                            chargingMarker.setMap(null);
+                        }}
+                        
+                        if (data.source && data.source.lat) {{
                             sourceMarker.setPosition(data.source);
                             sourceMarker.setMap(map);
                             bounds.extend(data.source);
@@ -1235,7 +1334,7 @@ with col_right:
                             sourceMarker.setMap(null);
                         }}
                         
-                        if (data.destination) {{
+                        if (data.destination && data.destination.lat) {{
                             destMarker.setPosition(data.destination);
                             destMarker.setMap(map);
                             bounds.extend(data.destination);
@@ -1251,7 +1350,7 @@ with col_right:
                         }}
                         
                         if (hasBounds && !window.hasFittedBounds) {{
-                            map.fitBounds(bounds, 40);
+                            map.fitBounds(bounds, 45);
                             if(map.getZoom() > 18) map.setZoom(18);
                             window.hasFittedBounds = true;
                         }}
@@ -1267,5 +1366,5 @@ with col_right:
     </html>
     """
     
-    components.html(map_html, height=380)
+    components.html(map_html, height=400)
     st.markdown('</div>', unsafe_allow_html=True)
