@@ -1737,6 +1737,29 @@ async def broadcast_to_dashboard():
     """Push full telemetry to all connected dashboard clients."""
     if not dashboard_clients:
         return
+
+    # Calculate accurate Path Distance ETA
+    eta_seconds = None
+    if live_location and destination_location:
+        try:
+            total_dist_meters = 0.0
+            if current_route and waypoint_index < len(current_route):
+                curr = to_tuple(live_location)
+                for i in range(waypoint_index, len(current_route)):
+                    nxt = to_tuple(current_route[i])
+                    total_dist_meters += calculate_distance(curr, nxt)
+                    curr = nxt
+                total_dist_meters += calculate_distance(curr, to_tuple(destination_location))
+            else:
+                total_dist_meters = calculate_distance(
+                    to_tuple(live_location),
+                    to_tuple(destination_location)
+                )
+            effective_speed_kmh = gps_speed if gps_speed > 0.5 else 3.0
+            eta_seconds = int(total_dist_meters / (effective_speed_kmh / 3.6))
+        except Exception:
+            pass
+
     data = {
         "type": "status_update",
         "status": current_status,
@@ -1754,6 +1777,7 @@ async def broadcast_to_dashboard():
         "gps_app_connected": gps_app_connected,
         "gps_speed": gps_speed,
         "gps_accuracy": gps_accuracy,
+        "eta_seconds": eta_seconds,
         "tracking_clients": len(tracking_clients),
         "camera_active": latest_frame is not None,
         "log_history": list(log_history)[-20:],
@@ -1820,6 +1844,13 @@ async def broadcast_to_tracking():
         "cargo_state": cargo_state,
         "speed": gps_speed,
         "eta_seconds": eta_seconds,
+        "battery_level": battery_level,
+        "motor_current": motor_current,
+        "distance_cm": current_distance_cm,
+        "obstacle_detected": obstacle_detected,
+        "esp32_connected": ws_connected,
+        "camera_active": latest_frame is not None,
+        "gps_app_connected": gps_app_connected,
         "delivery_id": current_delivery_id,
         "route_points": [{"lat": p.get("latitude", p.get("lat", 0)), "lng": p.get("longitude", p.get("lng", 0))} for p in current_route if isinstance(p, dict)] if current_route else []
     }
