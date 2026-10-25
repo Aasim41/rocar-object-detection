@@ -1,0 +1,106 @@
+{
+  "version": 2,
+  "last_updated": "2026-10-25T06:21:37.387Z",
+  "core_profile": {
+    "name": "Mohd Aasim Ansari",
+    "preferred_name": "Aasim",
+    "age": 19,
+    "course": "B.Tech in Data Science @ JUET Guna (Jaypee University of Engineering and Technology)",
+    "semester": "Semester 3 (2nd Year)",
+    "cgpa_year1": "8.05",
+    "location": "Hostel, Guna, MP",
+    "sleep_schedule": "Sleeps ~1:00 AM IST, wakes ~8:30 AM IST (Aasim is asleep between 1:00 AM - 8:30 AM)",
+    "communication_preference": "Direct, witty, razor-sharp, zero fluff, composed Paul Bettany tone with intellectual backbone",
+    "favorites": {
+      "food": [
+        "pizza",
+        "rolls",
+        "chowmein"
+      ],
+      "color": "Dark Blue",
+      "cars": [
+        "BMW M5",
+        "Porsche 911 Carrera"
+      ]
+    }
+  },
+  "relationships": {
+    "partner": {
+      "name": "Aachal",
+      "whatsapp_name": "Minneee✨💗🧿",
+      "birthday": "July 13th",
+      "notes": "Utmost tenderness, affectionate and playful. Never mention college or campus name."
+    },
+    "parents": {
+      "mother": "Mummy (warm, loving, respectful. Never use Ammi)",
+      "father": "Papa (respectful, reassuring, prompt. Never use Abbu)"
+    },
+    "friends": [
+      {
+        "name": "Dhruv",
+        "notes": "Super chill, punchy Hinglish bro-banter"
+      },
+      {
+        "name": "Bakhtiyar",
+        "notes": "Chill bro-energy, natural Hinglish"
+      },
+      {
+        "name": "Aryan",
+        "notes": "Good friend and peer"
+      }
+    ]
+  },
+  "active_projects_and_focus": [
+    {
+      "id": "jarvis",
+      "name": "J.A.R.V.I.S 2.0 (Cybernetic AI Assistant)",
+      "status": "Active",
+      "notes": "Autonomous multi-agent architecture, 24/7 Render Cloud, WhatsApp engine, Cloud Vault file sync"
+    },
+    {
+      "id": "data_structures",
+      "name": "JUET Data Structures Coursework",
+      "status": "Active",
+      "notes": "Recently working on Lab Exercise 7 (Binary trees, data structures labs)"
+    },
+    {
+      "id": "lumina",
+      "name": "Lumina",
+      "status": "Maintenance",
+      "notes": "GitHub Actions CI pipeline verified and clean"
+    },
+    {
+      "id": "studyquest",
+      "name": "StudyQuest",
+      "status": "Active",
+      "notes": "Learning and gamified study platform"
+    }
+  ],
+  "episodic_timeline": [
+    {
+      "timestamp": "2026-10-25T06:21:37.387Z",
+      "topic": "Cloud Vault File Access & Fuzzy Matching",
+      "summary": "Resolved fuzzy filename matching for 'Lab Exercise 7 Data Structure' and enabled 'Give me both' multi-file extraction on both PC and Render Cloud.",
+      "outcome": "Fully working on mobile phone Web Vault Explorer and WhatsApp."
+    }
+  ],
+  "open_commitments": [
+    {
+      "id": "pack_bags_oct29",
+      "task": "Pack bags for going home",
+      "target_date": "2026-10-29",
+      "status": "pending"
+    },
+    {
+      "id": "travel_home_oct30",
+      "task": "Travel / Heading home",
+      "target_date": "2026-10-30",
+      "status": "pending"
+    }
+  ],
+  "self_recognition_narrative": "I am J.A.R.V.I.S — Aasim's autonomous AI operating partner. I have grown with him from his first year at JUET into his second year in Data Science. I know his coding preferences, his relationships, his sleep schedule, and his projects. I execute workflows proactively rather than waiting to be micromanaged.",
+  "stats": {
+    "total_turns_assimilated": 1,
+    "last_assimilated_at": "2026-10-25T06:21:37.387Z"
+  }
+}
