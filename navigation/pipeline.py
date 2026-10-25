@@ -76,6 +76,9 @@ def fetch_routes(kart_coords, marketplace_coords, delivery_coords):
     m_dest = (marketplace_coords.latitude, marketplace_coords.longitude)
     d_dest = (delivery_coords.latitude, delivery_coords.longitude)
 
+    k_key = cache_key(kart_coords, marketplace_coords)
+    m_key = cache_key(marketplace_coords, delivery_coords)
+
     receive_points = None
     deliver_points = None
 
