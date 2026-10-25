@@ -1206,7 +1206,8 @@ async def get_status():
         "map_data": {
             "live_location": live_location,
             "source": source_location,
-            "destination": destination_location
+            "destination": destination_location,
+            "charging_station": charging_station
         }
     }
 
@@ -1376,11 +1377,20 @@ async def new_delivery(request: Request):
     source_location = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
     destination_location = {"lat": dropoff.get("lat", 0), "lng": dropoff.get("lng", 0)}
     
-    # Use pickup as charging/base station
-    charging_station = {"lat": pickup.get("lat", 0), "lng": pickup.get("lng", 0)}
+    # Preserve or configure charging_station (Base Station)
+    base = body.get("base") or body.get("charging_station")
+    if base and base.get("lat") and base.get("lng"):
+        charging_station = {"lat": float(base["lat"]), "lng": float(base["lng"])}
+    elif not charging_station or (charging_station.get("lat") == 0.0 and charging_station.get("lng") == 0.0):
+        # Default charging dock if not configured
+        if live_location and live_location.get("lat") and live_location.get("lng"):
+            charging_station = {"lat": float(live_location["lat"]), "lng": float(live_location["lng"])}
+        else:
+            # Default base station at JUET Campus dock
+            charging_station = {"lat": 24.4332, "lng": 77.1585}
     
-    start_lat = live_location["lat"] if live_location else charging_station["lat"]
-    start_lng = live_location["lng"] if live_location else charging_station["lng"]
+    start_lat = live_location["lat"] if (live_location and live_location.get("lat")) else charging_station["lat"]
+    start_lng = live_location["lng"] if (live_location and live_location.get("lng")) else charging_station["lng"]
 
     # 1. Accept Google Maps route points directly from AutoDrop app if provided
     app_route = body.get("route_points") or body.get("route") or []
@@ -1440,35 +1450,76 @@ async def new_delivery(request: Request):
     await broadcast_to_tracking()
     return {"status": "ok", "delivery_id": current_delivery_id, "phase": active_phase, "waypoints": len(current_route)}
 
-@app.post("/backend/verify_qr")
+@app.api_route("/backend/verify_qr", methods=["GET", "POST"])
 async def verify_qr(request: Request):
     global active_phase, cargo_state
-    body = await request.json()
-    cart_qr = body.get("cart_id", "")
-    action = body.get("action", "")  # "load" or "retrieve"
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+    else:
+        body = dict(request.query_params)
+        
+    cart_qr = body.get("cart_id") or body.get("cartId") or "cart_01"
+    action = body.get("action", "")
     
     cargo_state = "UNLOCKED"
     send_esp32("unlock")
     
+    is_browser = request.method == "GET" and "text/html" in request.headers.get("accept", "")
+    
     if action == "load":
         if active_phase == "HEADING_TO_SENDER":
             active_phase = "AWAITING_LOAD"
-        add_log(f"🔓 Cart unlocked for loading (QR: {cart_qr or 'Manual'})")
+        add_log(f"🔓 Cart unlocked for loading (QR: {cart_qr})")
         await broadcast_to_dashboard()
         await broadcast_to_tracking()
-        return {"status": "unlocked", "action": "load", "phase": active_phase, "message": "Cart unlocked for loading"}
+        resp_data = {"status": "unlocked", "action": "load", "phase": active_phase, "message": "Cart unlocked for loading"}
     elif action == "retrieve":
         if active_phase == "DELIVERING":
             active_phase = "AWAITING_RETRIEVAL"
-        add_log(f"🔓 Cart unlocked for retrieval (QR: {cart_qr or 'Manual'})")
+        add_log(f"🔓 Cart unlocked for retrieval (QR: {cart_qr})")
         await broadcast_to_dashboard()
         await broadcast_to_tracking()
-        return {"status": "unlocked", "action": "retrieve", "phase": active_phase, "message": "Cart unlocked for retrieval"}
+        resp_data = {"status": "unlocked", "action": "retrieve", "phase": active_phase, "message": "Cart unlocked for retrieval"}
     else:
-        add_log(f"🔓 Cart bypass unlocked (QR: {cart_qr or 'Manual'})")
+        add_log(f"🔓 Cart bypass unlocked via QR scan ({cart_qr})")
         await broadcast_to_dashboard()
         await broadcast_to_tracking()
-        return {"status": "unlocked", "action": "unlock", "phase": active_phase, "message": "Cart latch unlocked"}
+        resp_data = {"status": "unlocked", "action": "unlock", "phase": active_phase, "message": "Cart latch unlocked"}
+
+    if is_browser:
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>AutoDrop Cargo Unlocked</title>
+            <style>
+                body {{ background: #09090b; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }}
+                .card {{ background: #18181b; border: 1px solid #27272a; border-radius: 28px; padding: 36px 24px; max-width: 380px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); }}
+                .icon {{ font-size: 56px; margin-bottom: 16px; animation: bounce 1s infinite alternate; }}
+                @keyframes bounce {{ from {{ transform: translateY(0); }} to {{ transform: translateY(-8px); }} }}
+                h1 {{ font-size: 22px; font-weight: 800; margin: 0 0 8px; color: #4ade80; letter-spacing: -0.5px; }}
+                p {{ font-size: 14px; color: #a1a1aa; line-height: 1.5; margin: 0 0 24px; }}
+                .badge {{ display: inline-block; background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 18px; }}
+                .tag {{ font-size: 12px; color: #71717a; font-family: monospace; }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div class="icon">🔓</div>
+                <div class="badge">SERVO ROTATED 90°</div>
+                <h1>Cargo Bay Unlocked!</h1>
+                <p>The compartment lid is open. Please retrieve or load your package now.</p>
+                <div class="tag">AutoDrop Fleet • {cart_qr.upper()}</div>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html)
+    return resp_data
 
 @app.post("/backend/dispatch")
 async def dispatch_cart(request: Request):
@@ -1503,39 +1554,37 @@ async def complete_retrieval(request: Request):
     global active_phase, cargo_state
     cargo_state = "LOCKED"
     send_esp32("lock")
+    add_log("📦 Retrieval complete! Locking cargo bay and initiating autonomous return to base...")
     active_phase = "STANDBY"
-    asyncio.create_task(standby_timer())
-    return {"status": "standby", "message": "3-minute standby started"}
+    await broadcast_to_dashboard()
+    await broadcast_to_tracking()
+    asyncio.create_task(auto_return_after_retrieval())
+    return {"status": "returning", "message": "Package retrieved. Returning to Charging Base."}
 
-async def standby_timer():
-    global active_phase, current_route, waypoint_index, stored_deliver_points
-    await asyncio.sleep(180)  # 3 minutes
-    if active_phase == "STANDBY":
-        auto_return = os.environ.get("AUTO_RETURN_TO_BASE", "false").lower() == "true"
-        if auto_return:
-            active_phase = "RETURNING_TO_BASE"
-            if stored_deliver_points and len(stored_deliver_points) > 1:
-                current_route = list(reversed(stored_deliver_points))
-                waypoint_index = 0
-                add_log(f"⏰ Standby timeout: Auto-returning to Sender (Pickup) along reversed route ({len(current_route)} waypoints)")
-            elif charging_station.get("lat") and charging_station.get("lng"):
-                start_lat = live_location["lat"] if live_location else destination_location["lat"]
-                start_lng = live_location["lng"] if live_location else destination_location["lng"]
-                kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
-                base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
-                routes = fetch_routes(kart_obj, base_obj, base_obj)
-                current_route = routes.get('receive_points', [])
-                waypoint_index = 0
-                add_log(f"⏰ Standby timeout: Returning to base. Route points: {len(current_route)}")
-            await broadcast_to_dashboard()
-            await broadcast_to_tracking()
-        else:
-            # Safe default for testing: stay parked safely at destination in IDLE mode
-            active_phase = "IDLE"
-            send_esp32("stop")
-            add_log("⏰ 3-minute standby completed: Cart parked safely at destination in IDLE mode.")
-            await broadcast_to_dashboard()
-            await broadcast_to_tracking()
+async def auto_return_after_retrieval():
+    global active_phase, current_route, waypoint_index, stored_deliver_points, charging_station
+    # 4-second safety pause so user has retrieved hands/package and stepped clear
+    await asyncio.sleep(4)
+    active_phase = "RETURNING_TO_BASE"
+    add_log("🚀 Auto-return initiated: Cart departing destination for Charging Station Dock...")
+    
+    # 1. Reverse route from dropoff back to base or sender
+    if stored_deliver_points and len(stored_deliver_points) > 1:
+        current_route = list(reversed(stored_deliver_points))
+        waypoint_index = 0
+        add_log(f"🏠 Following reverse waypoint trajectory back to Base ({len(current_route)} waypoints)")
+    elif charging_station.get("lat") and charging_station.get("lng"):
+        start_lat = live_location["lat"] if live_location else destination_location["lat"]
+        start_lng = live_location["lng"] if live_location else destination_location["lng"]
+        kart_obj = KartCoordinates(latitude=start_lat, longitude=start_lng, heading=current_heading)
+        base_obj = Coordinates(latitude=charging_station["lat"], longitude=charging_station["lng"])
+        routes = fetch_routes(kart_obj, base_obj, base_obj)
+        current_route = routes.get('receive_points', [])
+        waypoint_index = 0
+        add_log(f"🏠 Navigation route planned to Base charging station ({len(current_route)} waypoints)")
+        
+    await broadcast_to_dashboard()
+    await broadcast_to_tracking()
 
 @app.post("/backend/coordinates/destinations")
 async def get_coordinates(req: Request):
@@ -1711,7 +1760,8 @@ async def broadcast_to_dashboard():
         "map_data": {
             "live_location": live_location,
             "source": source_location,
-            "destination": destination_location
+            "destination": destination_location,
+            "charging_station": charging_station
         }
     }
     msg = json.dumps(data)
@@ -1764,6 +1814,7 @@ async def broadcast_to_tracking():
         "cart": live_location,
         "source": source_location,
         "destination": destination_location,
+        "charging_station": charging_station,
         "phase": active_phase,
         "cargo_state": cargo_state,
         "speed": gps_speed,
