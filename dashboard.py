@@ -9,50 +9,53 @@ from datetime import datetime
 # Page Configuration
 # ============================================================
 st.set_page_config(
-    page_title="🤖 MISSION CONTROL — Autonomous Delivery",
+    page_title="AutoDrop™ Mission Control",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # ============================================================
-# Premium Dark Mission Control Theme
+# Executive Cyber-Dark Glassmorphic Theme & GSAP Stylesheet
 # ============================================================
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
     
-    /* ===== CORE VARIABLES & ANIMATIONS ===== */
     :root {
-        --bg-main: #0A0A0B; /* Deep neutral black */
-        --bg-panel: rgba(24, 24, 27, 0.6); /* Neutral zinc */
+        --bg-main: #06080e;
+        --bg-panel: linear-gradient(145deg, rgba(18, 24, 38, 0.72), rgba(10, 14, 24, 0.78));
         --border-color: rgba(255, 255, 255, 0.08);
-        --border-hover: rgba(255, 255, 255, 0.15);
-        --accent-blue: #ffffff; /* Clean white instead of neon blue */
-        --text-main: #ededed;
-        --text-muted: #a1a1aa;
+        --border-glow: rgba(56, 189, 248, 0.35);
+        --cyan-neon: #06b6d4;
+        --emerald-neon: #10b981;
+        --amber-neon: #f59e0b;
+        --purple-neon: #8b5cf6;
+        --rose-neon: #f43f5e;
+        --text-main: #f8fafc;
+        --text-muted: #94a3b8;
     }
 
-    @keyframes fadeSlideUp {
-        0% { opacity: 0; transform: translateY(15px); }
-        100% { opacity: 1; transform: translateY(0); }
-    }
-
+    /* Ambient Background Mesh */
     .stApp {
-        background: var(--bg-main) !important;
-        /* Removed the glowing radial gradients for a cleaner, flatter look */
+        background-color: var(--bg-main) !important;
+        background-image: 
+            radial-gradient(circle at 10% 8%, rgba(6, 182, 212, 0.12) 0%, transparent 40%),
+            radial-gradient(circle at 90% 15%, rgba(139, 92, 246, 0.10) 0%, transparent 45%),
+            radial-gradient(circle at 50% 95%, rgba(16, 185, 129, 0.08) 0%, transparent 50%) !important;
+        background-attachment: fixed !important;
         color: var(--text-main);
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
     }
 
     #MainMenu, footer, .stDeployButton, header { display: none !important; }
 
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.3); }
 
-    /* ===== ANTI-BLINK: Hide Streamlit fragment re-render flash ===== */
+    /* Hide Streamlit fragment re-render flash */
     [data-stale="true"],
     .stale,
     .element-container.stale,
@@ -61,7 +64,6 @@ st.markdown("""
         transition: none !important;
     }
     
-    /* Prevent any fade-out/fade-in transitions on fragment containers */
     .stElementContainer,
     .element-container,
     [data-testid="stVerticalBlock"],
@@ -70,92 +72,107 @@ st.markdown("""
         animation: none !important;
     }
     
-    /* Kill the spinner/loading overlay that appears during re-render */
     .stSpinner, [data-testid="stSpinner"] {
         display: none !important;
     }
 
-    /* ===== TOP BAR (GLASSMORPHISM) ===== */
+    /* ===== LUXURY TOP BAR ===== */
     .topbar {
-        background: rgba(10, 10, 11, 0.85);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border-bottom: 1px solid var(--border-color);
-        padding: 20px 40px;
+        background: linear-gradient(180deg, rgba(12, 16, 28, 0.94) 0%, rgba(8, 11, 18, 0.90) 100%);
+        backdrop-filter: blur(28px);
+        -webkit-backdrop-filter: blur(28px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 16px 36px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin: -1.2rem -1.2rem 24px -1.2rem;
+        margin: -1.2rem -1.2rem 20px -1.2rem;
         position: sticky;
         top: 0;
         z-index: 999;
-        animation: fadeSlideUp 0.5s ease-out;
+        box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+    }
+
+    .brand-wrap {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .brand-logo-icon {
+        width: 38px;
+        height: 38px;
+        background: linear-gradient(135deg, #06b6d4, #3b82f6);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        box-shadow: 0 0 18px rgba(6, 182, 212, 0.4);
     }
 
     .topbar-title {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-size: 20px;
         font-weight: 800;
         letter-spacing: 0.5px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
+        line-height: 1.1;
     }
     
     .topbar-title span {
-        background: linear-gradient(to right, #ffffff, #94a3b8);
+        background: linear-gradient(90deg, #ffffff 0%, #38bdf8 60%, #818cf8 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
 
     .topbar-subtitle {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
-        color: var(--text-muted);
-        letter-spacing: 1.5px;
+        font-size: 10px;
+        color: #94a3b8;
+        letter-spacing: 1.8px;
         text-transform: uppercase;
-        margin-top: 4px;
-        opacity: 0.7;
+        margin-top: 3px;
     }
 
     .topbar-right {
         display: flex;
         align-items: center;
-        gap: 20px;
+        gap: 18px;
     }
 
     .live-clock {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 13px;
-        color: var(--text-muted);
-        background: rgba(255,255,255,0.03);
+        font-size: 12px;
+        color: #94a3b8;
+        background: rgba(255,255,255,0.04);
         padding: 6px 14px;
         border-radius: 8px;
         border: 1px solid var(--border-color);
     }
 
     /* ===== CONNECTION PILLS ===== */
-    .conn-group { display: flex; gap: 10px; }
+    .conn-group { display: flex; gap: 8px; }
     .conn-pill {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
+        gap: 7px;
+        padding: 5px 12px;
         border-radius: 30px;
-        font-family: 'Inter', sans-serif;
+        font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.5px;
         transition: all 0.3s ease;
     }
     .conn-online {
-        background: rgba(16, 185, 129, 0.08);
-        border: 1px solid rgba(16, 185, 129, 0.2);
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
         color: #34d399;
+        box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
     }
     .conn-offline {
         background: rgba(239, 68, 68, 0.08);
-        border: 1px solid rgba(239, 68, 68, 0.2);
+        border: 1px solid rgba(239, 68, 68, 0.25);
         color: #f87171;
     }
     
@@ -163,48 +180,53 @@ st.markdown("""
         width: 6px; height: 6px;
         border-radius: 50%;
     }
-    .conn-dot-on { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
-    .conn-dot-off { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
+    .conn-dot-on { background: #34d399; box-shadow: 0 0 8px #34d399; }
+    .conn-dot-off { background: #f87171; box-shadow: 0 0 8px #f87171; }
 
-    @keyframes softPulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.6; transform: scale(0.95); }
+    @keyframes pulseRing {
+        0% { transform: scale(0.95); opacity: 0.8; }
+        50% { transform: scale(1.15); opacity: 0.3; }
+        100% { transform: scale(0.95); opacity: 0.8; }
     }
-    .conn-online .conn-dot { animation: softPulse 2.5s ease-in-out infinite; }
+    .conn-online .conn-dot { animation: pulseRing 2s ease-in-out infinite; }
 
-    /* ===== PREMIUM PANELS ===== */
+    /* ===== BENTO GLASS PANELS ===== */
     .panel {
         background: var(--bg-panel);
         border: 1px solid var(--border-color);
-        border-radius: 16px;
-        padding: 24px;
+        border-top: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 18px;
+        padding: 22px;
         margin-bottom: 20px;
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        animation: fadeSlideUp 0.6s ease-out backwards;
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        position: relative;
+        overflow: hidden;
     }
     
-    /* Stagger panel animations */
-    .panel:nth-child(1) { animation-delay: 0.1s; }
-    .panel:nth-child(2) { animation-delay: 0.2s; }
-    .panel:nth-child(3) { animation-delay: 0.3s; }
+    .panel::after {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.35), transparent);
+    }
 
     .panel:hover {
-        border-color: var(--border-hover);
-        box-shadow: 0 8px 32px rgba(14, 165, 233, 0.05);
+        border-color: rgba(255, 255, 255, 0.16);
         transform: translateY(-2px);
+        box-shadow: 0 20px 45px -8px rgba(6, 182, 212, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     }
 
     .panel-label {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-size: 11px;
         font-weight: 700;
-        color: var(--text-muted);
-        letter-spacing: 1.5px;
+        color: #94a3b8;
+        letter-spacing: 1.6px;
         text-transform: uppercase;
-        margin-bottom: 20px;
+        margin-bottom: 18px;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -212,149 +234,164 @@ st.markdown("""
     .panel-label::before {
         content: '';
         width: 6px; height: 6px;
-        background: var(--accent-blue);
+        background: var(--cyan-neon);
         border-radius: 50%;
-        box-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
+        box-shadow: 0 0 10px var(--cyan-neon);
     }
 
     /* ===== STATUS READOUT ===== */
-    .status-readout {
-        font-family: 'Inter', sans-serif;
-        font-size: 20px;
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(6, 182, 212, 0.12);
+        border: 1px solid rgba(6, 182, 212, 0.3);
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
         font-weight: 700;
-        color: #f1f5f9;
+        color: #38bdf8;
+        margin-bottom: 10px;
+    }
+
+    .status-readout {
+        font-family: 'Outfit', sans-serif;
+        font-size: 22px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.3px;
         margin-bottom: 6px;
     }
+    
     .status-detail {
         font-family: 'JetBrains Mono', monospace;
         font-size: 12px;
-        color: var(--text-muted);
+        color: #94a3b8;
+        line-height: 1.5;
     }
 
     /* ===== METRIC TILES ===== */
     .metric-tile {
-        background: rgba(0, 0, 0, 0.2);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
+        background: rgba(0, 0, 0, 0.32);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        padding: 16px 14px;
         text-align: center;
         transition: all 0.2s ease;
     }
     .metric-tile:hover {
-        background: rgba(255, 255, 255, 0.02);
-        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(56, 189, 248, 0.3);
+        transform: translateY(-1px);
     }
     .metric-tile-value {
         font-family: 'JetBrains Mono', monospace;
         font-size: 24px;
-        font-weight: 600;
+        font-weight: 700;
         color: #f8fafc;
+        letter-spacing: -0.5px;
     }
     .metric-tile-unit {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-size: 12px;
-        font-weight: 500;
-        color: var(--text-muted);
+        font-weight: 600;
+        color: #94a3b8;
         margin-left: 2px;
     }
     .metric-tile-label {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-size: 10px;
-        color: var(--text-muted);
-        letter-spacing: 1px;
+        color: #94a3b8;
+        letter-spacing: 1.2px;
         text-transform: uppercase;
-        margin-top: 8px;
-        font-weight: 600;
+        margin-top: 6px;
+        font-weight: 700;
     }
 
-    /* ===== VIDEO WRAPPER ===== */
+    /* ===== VIDEO WRAPPER WITH HUD FRAME ===== */
     .video-wrap {
-        border-radius: 12px;
+        border-radius: 14px;
         overflow: hidden;
-        border: 1px solid var(--border-color);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         background: #000;
         position: relative;
-        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.7);
     }
     .video-wrap img {
         width: 100%;
         display: block;
-        opacity: 0.9;
-        transition: opacity 0.3s ease;
+        opacity: 0.95;
     }
-    .video-wrap:hover img {
-        opacity: 1;
-    }
+    
+    .video-reticle-tl { position: absolute; top: 10px; left: 10px; width: 14px; height: 14px; border-top: 2px solid #38bdf8; border-left: 2px solid #38bdf8; }
+    .video-reticle-tr { position: absolute; top: 10px; right: 10px; width: 14px; height: 14px; border-top: 2px solid #38bdf8; border-right: 2px solid #38bdf8; }
+    .video-reticle-bl { position: absolute; bottom: 10px; left: 10px; width: 14px; height: 14px; border-bottom: 2px solid #38bdf8; border-left: 2px solid #38bdf8; }
+    .video-reticle-br { position: absolute; bottom: 10px; right: 10px; width: 14px; height: 14px; border-bottom: 2px solid #38bdf8; border-right: 2px solid #38bdf8; }
+
     .video-overlay-tl {
         position: absolute;
-        top: 12px; left: 12px;
-        font-family: 'Inter', sans-serif;
+        top: 14px; left: 18px;
+        font-family: 'JetBrains Mono', monospace;
         font-size: 10px;
         font-weight: 700;
         color: #fff;
-        background: rgba(239, 68, 68, 0.9);
+        background: rgba(225, 29, 72, 0.85);
         padding: 4px 10px;
         border-radius: 6px;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.8px;
         display: flex;
         align-items: center;
         gap: 6px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        box-shadow: 0 0 12px rgba(225, 29, 72, 0.5);
     }
-    .video-overlay-tl::before {
-        content: '';
-        display: block;
-        width: 6px; height: 6px;
-        background: #fff;
-        border-radius: 50%;
-        animation: softPulse 2s infinite;
-    }
+    
     .video-overlay-tr {
         position: absolute;
-        top: 12px; right: 12px;
+        top: 14px; right: 18px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 10px;
-        color: rgba(255,255,255,0.8);
-        background: rgba(0,0,0,0.6);
-        backdrop-filter: blur(4px);
+        color: #38bdf8;
+        background: rgba(10, 15, 25, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(56, 189, 248, 0.3);
         padding: 4px 10px;
         border-radius: 6px;
     }
 
-    /* ===== STREAMLIT NATIVE BUTTONS ===== */
+    /* ===== STREAMLIT BUTTON OVERHAUL ===== */
     .stButton > button {
-        background: rgba(255, 255, 255, 0.05) !important;
-        color: #f1f5f9 !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 10px !important;
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 500 !important;
-        font-size: 14px !important;
-        padding: 10px 16px !important;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.25) !important;
+        border-radius: 12px !important;
+        font-family: 'Outfit', sans-serif !important;
+        font-weight: 700 !important;
+        font-size: 13px !important;
+        letter-spacing: 0.6px !important;
+        padding: 12px 18px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+        transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
         width: 100%;
     }
     .stButton > button:hover {
-        background: rgba(255, 255, 255, 0.1) !important;
-        border-color: rgba(255, 255, 255, 0.2) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        background: linear-gradient(180deg, rgba(51, 65, 85, 0.9) 0%, rgba(30, 41, 59, 1.0) 100%) !important;
+        border-color: rgba(56, 189, 248, 0.5) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(6, 182, 212, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
     }
     .stButton > button:active {
-        transform: translateY(1px);
-        background: rgba(255, 255, 255, 0.03) !important;
+        transform: translateY(1px) !important;
     }
-    
-    /* Highlight specific buttons if they contain specific text (hack for Streamlit) */
-    .stButton > button p:contains("START") { color: #34d399 !important; }
-    .stButton > button p:contains("STOP") { color: #f87171 !important; }
 
     /* ===== LOG TERMINAL ===== */
     .log-terminal {
-        background: rgba(0, 0, 0, 0.3);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 12px 16px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 14px;
         max-height: 220px;
         overflow-y: auto;
         font-family: 'JetBrains Mono', monospace;
@@ -373,44 +410,13 @@ st.markdown("""
         color: #64748b; 
         min-width: 65px;
     }
-    
-    /* ===== PROXIMITY BAR ===== */
-    .prox-bar-container {
-        background: rgba(0,0,0,0.2);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 14px 16px;
-        margin-bottom: 16px;
-    }
-    .prox-bar-track {
-        width: 100%;
-        height: 6px;
-        background: rgba(255,255,255,0.05);
-        border-radius: 3px;
-        overflow: hidden;
-        position: relative;
-    }
-    .prox-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .prox-bar-labels {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 8px;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px;
-        font-weight: 500;
-        color: var(--text-muted);
-    }
 
     /* ===== NO-CAM PLACEHOLDER ===== */
     .no-cam {
         width: 100%;
-        height: 400px;
-        background: rgba(0,0,0,0.2);
-        border-radius: 12px;
+        height: 380px;
+        background: rgba(0,0,0,0.3);
+        border-radius: 14px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -418,17 +424,17 @@ st.markdown("""
         border: 1px dashed rgba(255,255,255,0.15);
     }
     .no-cam-icon { 
-        font-size: 32px; 
+        font-size: 36px; 
         margin-bottom: 12px; 
-        opacity: 0.5;
-        filter: grayscale(1);
+        opacity: 0.6;
     }
     .no-cam-text {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-size: 13px;
-        font-weight: 500;
-        color: var(--text-muted);
-        letter-spacing: 0.5px;
+        font-weight: 600;
+        color: #94a3b8;
+        letter-spacing: 1px;
+        text-transform: uppercase;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -436,7 +442,6 @@ st.markdown("""
 # ============================================================
 # Configuration
 # ============================================================
-import os
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 # ============================================================
@@ -460,12 +465,6 @@ def fetch_telemetry_stats():
         pass
     return {"total_logs": 0, "cached_routes": 0, "cache_hits": 0, "recent_logs": []}
 
-def send_control(action: str):
-    try:
-        requests.post(f"{BACKEND_URL}/backend/manual_control", json={"action": action}, timeout=2)
-    except Exception:
-        st.error("⚠️ Command failed")
-
 def toggle_mode(mode: str):
     try:
         res = requests.post(f"{BACKEND_URL}/set_mode", json={"mode": mode}, timeout=2)
@@ -475,7 +474,7 @@ def toggle_mode(mode: str):
         return False
 
 # ============================================================
-# Fetch Telemetry
+# Initial Fetch
 # ============================================================
 status_data = fetch_status()
 backend_online = status_data is not None
@@ -484,6 +483,7 @@ if status_data is None:
     status_data = {
         "status": "BACKEND OFFLINE",
         "mode": "unknown",
+        "active_phase": "IDLE",
         "cargo_state": "UNKNOWN",
         "latestLog": "Cannot reach backend",
         "obstacle_detected": False,
@@ -494,14 +494,12 @@ if status_data is None:
         "esp_commands": []
     }
 
-is_manual = status_data["mode"] == "manual"
+is_manual = status_data.get("mode") == "manual"
 now = datetime.now().strftime("%H:%M:%S")
 
 # ============================================================
-# MAIN GRID
+# TOP BAR
 # ============================================================
-
-# ==================== TOP BAR ====================
 s = fetch_status() or status_data
 backend_online = s["status"] != "BACKEND OFFLINE"
 
@@ -512,44 +510,399 @@ def conn_pill(label, online):
 
 st.markdown(f"""
 <div class="topbar">
-    <div>
-        <div class="topbar-title">MISSION CONTROL</div>
-        <div class="topbar-subtitle">AUTONOMOUS DELIVERY SYSTEM v2.0</div>
+    <div class="brand-wrap">
+        <div class="brand-logo-icon">🤖</div>
+        <div>
+            <div class="topbar-title"><span>AutoDrop™ MISSION CONTROL</span></div>
+            <div class="topbar-subtitle">AUTONOMOUS GROUND FLEET TELEMETRY • CART 01</div>
+        </div>
     </div>
     <div class="topbar-right">
         <div class="conn-group">
             {conn_pill("BACKEND", backend_online)}
             {conn_pill("ARDUINO", s.get("esp32_connected", False))}
             {conn_pill("CAMERA", s.get("camera_active", False))}
-            {conn_pill("GPS APP", s.get("gps_app_connected", False))}
-            {conn_pill("TRACKING", s.get("tracking_clients", 0) > 0)}
+            {conn_pill("GPS PHONE", s.get("gps_app_connected", False))}
+            {conn_pill("APP TRACK", s.get("tracking_clients", 0) > 0)}
         </div>
+        <div class="live-clock">{now} LOCAL</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
+# ============================================================
+# INTERACTIVE GSAP COCKPIT TELEMETRY & PHASE RIBBON
+# ============================================================
+hud_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; user-select: none; }}
+    body {{ background: transparent; font-family: 'Outfit', -apple-system, sans-serif; color: #f8fafc; padding: 0 4px; }}
+    
+    .cockpit-container {{
+        background: linear-gradient(135deg, rgba(20, 27, 45, 0.75) 0%, rgba(10, 14, 24, 0.8) 100%);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        padding: 16px 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }}
+
+    /* Mission Phase Ribbon */
+    .ribbon-wrap {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        padding: 12px 18px;
+        position: relative;
+    }}
+    
+    .phase-node {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        opacity: 0.45;
+        transition: all 0.4s ease;
+    }}
+    .phase-node.active {{
+        opacity: 1;
+        transform: scale(1.05);
+    }}
+    
+    .phase-badge {{
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        transition: all 0.3s;
+    }}
+    .phase-node.active .phase-badge {{
+        background: #06b6d4;
+        border-color: #38bdf8;
+        box-shadow: 0 0 16px rgba(6, 182, 212, 0.6);
+        color: #000;
+    }}
+
+    .phase-name {{
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: #94a3b8;
+    }}
+    .phase-node.active .phase-name {{
+        color: #ffffff;
+    }}
+
+    .phase-line {{
+        flex: 1;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.08);
+        margin: 0 12px;
+        position: relative;
+        overflow: hidden;
+    }}
+    .phase-line-fill {{
+        position: absolute;
+        top: 0; left: 0; bottom: 0; width: 0%;
+        background: linear-gradient(90deg, #06b6d4, #3b82f6);
+        box-shadow: 0 0 8px #06b6d4;
+        transition: width 0.5s ease;
+    }}
+
+    /* Cockpit Metrics Grid */
+    .cockpit-grid {{
+        display: grid;
+        grid-template-columns: 1.2fr 1.5fr 1fr 1.2fr;
+        gap: 12px;
+    }}
+
+    .cockpit-card {{
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }}
+
+    .card-hdr {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.2px;
+        color: #94a3b8;
+        text-transform: uppercase;
+    }}
+
+    .big-num {{
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 26px;
+        font-weight: 700;
+        color: #ffffff;
+        margin: 4px 0;
+    }}
+    .num-unit {{
+        font-size: 12px;
+        color: #94a3b8;
+        font-weight: 600;
+        margin-left: 2px;
+    }}
+
+    /* Radar Sonar Arc */
+    .radar-arc-wrap {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 4px;
+    }}
+    .radar-svg {{
+        width: 100px;
+        height: 48px;
+    }}
+    .radar-dist-tag {{
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 16px;
+        font-weight: 700;
+        color: #10b981;
+    }}
+
+    /* Latch Dial Pill */
+    .latch-pill {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        font-weight: 700;
+        margin-top: 6px;
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }}
+    .latch-pill.unlocked {{
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+        border-color: rgba(16, 185, 129, 0.3);
+    }}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+</head>
+<body>
+<div class="cockpit-container">
+    <!-- 1. Live Mission Ribbon -->
+    <div class="ribbon-wrap">
+        <div class="phase-node active" id="node-base">
+            <div class="phase-badge">⚡</div>
+            <div class="phase-name">1. Base Dock</div>
+        </div>
+        <div class="phase-line"><div class="phase-line-fill" id="pfill-1"></div></div>
+
+        <div class="phase-node" id="node-pickup">
+            <div class="phase-badge">📦</div>
+            <div class="phase-name">2. Sender (Pickup)</div>
+        </div>
+        <div class="phase-line"><div class="phase-line-fill" id="pfill-2"></div></div>
+
+        <div class="phase-node" id="node-transit">
+            <div class="phase-badge">🚀</div>
+            <div class="phase-name">3. In Transit</div>
+        </div>
+        <div class="phase-line"><div class="phase-line-fill" id="pfill-3"></div></div>
+
+        <div class="phase-node" id="node-receiver">
+            <div class="phase-badge">🎯</div>
+            <div class="phase-name">4. Receiver (Unlock)</div>
+        </div>
+        <div class="phase-line"><div class="phase-line-fill" id="pfill-4"></div></div>
+
+        <div class="phase-node" id="node-return">
+            <div class="phase-badge">🏠</div>
+            <div class="phase-name">5. Return To Base</div>
+        </div>
+    </div>
+
+    <!-- 2. Live Telemetry Strip -->
+    <div class="cockpit-grid">
+        <!-- Velocity -->
+        <div class="cockpit-card">
+            <div class="card-hdr"><span>GPS VELOCITY</span><span>🛰️</span></div>
+            <div class="big-num" id="val-speed">0.0<span class="num-unit">km/h</span></div>
+            <div style="font-size:10px; color:#64748b;" id="val-eta">ETA: Calculating...</div>
+        </div>
+
+        <!-- Radar Sonar Arc -->
+        <div class="cockpit-card">
+            <div class="card-hdr"><span>ULTRASONIC RADAR</span><span>🎯</span></div>
+            <div class="radar-arc-wrap">
+                <svg viewBox="0 0 100 50" class="radar-svg">
+                    <path d="M 10 46 A 40 40 0 0 1 90 46" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="3" stroke-dasharray="3,3" />
+                    <path d="M 25 46 A 25 25 0 0 1 75 46" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+                    <line id="radar-beam" x1="50" y1="46" x2="50" y2="8" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" />
+                </svg>
+                <div>
+                    <div class="radar-dist-tag" id="val-dist">-- cm</div>
+                    <div style="font-size:9px; color:#94a3b8;" id="val-radar-status">PATH CLEAR</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Power Core -->
+        <div class="cockpit-card">
+            <div class="card-hdr"><span>ENERGY CORE</span><span>🔋</span></div>
+            <div class="big-num" id="val-bat">--<span class="num-unit">%</span></div>
+            <div style="font-size:10px; color:#10b981;" id="val-amps">0.0A Draw</div>
+        </div>
+
+        <!-- Latch Status -->
+        <div class="cockpit-card">
+            <div class="card-hdr"><span>CARGO COMPARTMENT</span><span>🔒</span></div>
+            <div>
+                <span class="latch-pill" id="val-latch">🔒 LOCKED (0°)</span>
+            </div>
+            <div style="font-size:10px; color:#64748b; margin-top:4px;">Dual PIN & QR Servo Latch</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Continuous GSAP Radar Sonar Beam Sweep
+    gsap.to('#radar-beam', {{
+        rotation: 40,
+        transformOrigin: "50px 46px",
+        duration: 1.4,
+        repeat: -1,
+        yoyo: true,
+        ease: "sine.inOut"
+    }});
+
+    // Live WebSocket connection to Cart
+    const wsUrl = "{BACKEND_URL}".replace(/^http/, 'ws') + "/ws/track";
+    let ws;
+
+    function connectWS() {{
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (event) => {{
+            try {{
+                const data = JSON.parse(event.data);
+                if (data.type !== 'location_update') return;
+
+                // 1. Update Velocity with GSAP
+                if (data.speed !== undefined) {{
+                    const spd = Number(data.speed).toFixed(1);
+                    document.getElementById('val-speed').innerHTML = spd + '<span class="num-unit">km/h</span>';
+                }}
+                
+                // 2. Update ETA
+                if (data.eta_seconds !== undefined) {{
+                    const etaEl = document.getElementById('val-eta');
+                    if (data.eta_seconds > 0) {{
+                        const m = Math.ceil(data.eta_seconds / 60);
+                        etaEl.innerText = "ETA: ~" + m + " min (" + data.eta_seconds + "s)";
+                    }} else {{
+                        etaEl.innerText = "ETA: Destination Reached";
+                    }}
+                }}
+
+                // 3. Update Cargo Latch
+                const latchEl = document.getElementById('val-latch');
+                if (data.cargo_state === 'UNLOCKED') {{
+                    latchEl.className = 'latch-pill unlocked';
+                    latchEl.innerText = '🔓 UNLOCKED (90°)';
+                }} else {{
+                    latchEl.className = 'latch-pill';
+                    latchEl.innerText = '🔒 LOCKED (0°)';
+                }}
+
+                // 4. Update Mission Stage Ribbon
+                const phase = String(data.phase || '').toUpperCase();
+                const nodes = ['node-base', 'node-pickup', 'node-transit', 'node-receiver', 'node-return'];
+                nodes.forEach(n => document.getElementById(n).classList.remove('active'));
+
+                if (phase === 'IDLE') {{
+                    document.getElementById('node-base').classList.add('active');
+                }} else if (phase === 'HEADING_TO_SENDER' || phase === 'AWAITING_LOAD') {{
+                    document.getElementById('node-pickup').classList.add('active');
+                    document.getElementById('pfill-1').style.width = '100%';
+                }} else if (phase === 'DELIVERING') {{
+                    document.getElementById('node-transit').classList.add('active');
+                    document.getElementById('pfill-1').style.width = '100%';
+                    document.getElementById('pfill-2').style.width = '100%';
+                }} else if (phase === 'AWAITING_RETRIEVAL') {{
+                    document.getElementById('node-receiver').classList.add('active');
+                    document.getElementById('pfill-1').style.width = '100%';
+                    document.getElementById('pfill-2').style.width = '100%';
+                    document.getElementById('pfill-3').style.width = '100%';
+                }} else if (phase === 'RETURNING_TO_BASE') {{
+                    document.getElementById('node-return').classList.add('active');
+                    document.getElementById('pfill-1').style.width = '100%';
+                    document.getElementById('pfill-2').style.width = '100%';
+                    document.getElementById('pfill-3').style.width = '100%';
+                    document.getElementById('pfill-4').style.width = '100%';
+                }}
+            }} catch(e) {{}}
+        }};
+        ws.onclose = () => setTimeout(connectWS, 2000);
+    }}
+    connectWS();
+</script>
+</body>
+</html>
+"""
+
+components.html(hud_html, height=185)
+
+# ============================================================
+# MAIN TWO-COLUMN LAYOUT
+# ============================================================
 col_left, col_right = st.columns([5, 3], gap="large")
 
 # ==================== LEFT COLUMN ====================
 with col_left:
-    # --- LIVE FEED ---
+    # --- LIVE VISION FEED ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">LIVE VISION FEED — YOLOv8</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">LIVE VISION STREAM — YOLOv8 AI DETECTION</div>', unsafe_allow_html=True)
 
     if backend_online and status_data.get("camera_active"):
         st.markdown(f"""
         <div class="video-wrap">
+            <div class="video-reticle-tl"></div>
+            <div class="video-reticle-tr"></div>
+            <div class="video-reticle-bl"></div>
+            <div class="video-reticle-br"></div>
             <img id="yolo-feed" src="{BACKEND_URL}/video_feed" alt="YOLO Feed"
                  onerror="setTimeout(function(){{ document.getElementById('yolo-feed').src='{BACKEND_URL}/video_feed?t='+Date.now(); }}, 2000);" />
-            <div class="video-overlay-tl">● REC</div>
-            <div class="video-overlay-tr">YOLO v8n</div>
+            <div class="video-overlay-tl">● REC LIVE</div>
+            <div class="video-overlay-tr">YOLOv8n • 640×480 • 30 FPS</div>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="no-cam">
             <div class="no-cam-icon">📡</div>
-            <div class="no-cam-text">AWAITING VIDEO SIGNAL</div>
+            <div class="no-cam-text">AWAITING VIDEO CAMERA SIGNAL</div>
+            <div style="font-size:11px; color:#64748b; margin-top:6px;">Webcam index 0 standing by</div>
         </div>
         """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -560,7 +913,7 @@ with col_left:
         import html
         s = fetch_status() or status_data
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">SYSTEM LOG</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">SYSTEM EVENT LOG</div>', unsafe_allow_html=True)
     
         log_history = s.get("log_history", [])
         if log_history:
@@ -574,12 +927,12 @@ with col_left:
                     log_html += f'<div class="log-line">{html.escape(log)}</div>'
             st.markdown(f'<div class="log-terminal">{log_html}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="log-terminal"><div class="log-line" style="color:#334155; text-align:center;">Waiting for log data...</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="log-terminal"><div class="log-line" style="color:#64748b; text-align:center;">Waiting for system logs...</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
         # --- BOT HARDWARE COMMAND TERMINAL ---
         st.markdown('<div class="panel" style="margin-top: 14px;">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">BOT HARDWARE TELEMETRY</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">ARDUINO SERIAL COMMAND FEED</div>', unsafe_allow_html=True)
     
         esp_history = s.get("esp_commands", [])
         if esp_history:
@@ -588,24 +941,18 @@ with col_left:
                 if "]" in log:
                     ts, msg = log.split("]", 1)
                     ts, msg = html.escape(ts), html.escape(msg)
-                    if "SENT" in msg:
-                        color = "#4ade80" # Green
-                    elif "RECV" in msg:
-                        color = "#38bdf8" # Blue
-                    else:
-                        color = "#64748b"
-                        
+                    color = "#34d399" if "SENT" in msg else "#38bdf8" if "RECV" in msg else "#94a3b8"
                     esp_html += f'<div class="log-line"><span class="log-timestamp">{ts}]</span><span style="color:{color}; font-weight:600;">{msg}</span></div>'
                 else:
                     esp_html += f'<div class="log-line">{html.escape(log)}</div>'
-            st.markdown(f'<div class="log-terminal" style="max-height:150px;">{esp_html}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="log-terminal" style="max-height:140px;">{esp_html}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="log-terminal" style="max-height:150px;"><div class="log-line" style="color:#334155; text-align:center;">No hardware telemetry...</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="log-terminal" style="max-height:140px;"><div class="log-line" style="color:#64748b; text-align:center;">No hardware telemetry...</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     render_system_log()
 
-    # --- MISSION TELEMETRY BLACKBOX & ROUTE CACHE ---
+    # --- MISSION TELEMETRY BLACKBOX ---
     @st.fragment(run_every="2s")
     def render_mission_telemetry_cache():
         t_stats = fetch_telemetry_stats()
@@ -615,55 +962,45 @@ with col_left:
         recent_logs = t_stats.get("recent_logs", [])
         
         st.markdown('<div class="panel" style="margin-top: 14px;">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">MISSION TELEMETRY BLACKBOX & ROUTE CACHE</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">BLACKBOX TELEMETRY & ROUTE CACHE</div>', unsafe_allow_html=True)
         
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:16px; color:#38bdf8;">{total_logs:,}</div>
-                <div class="metric-tile-label" style="font-size:8px;">FLIGHT TICKS</div>
+            <div class="metric-tile">
+                <div class="metric-tile-value" style="color:#38bdf8;">{total_logs:,}</div>
+                <div class="metric-tile-label">FLIGHT TICKS</div>
             </div>
             """, unsafe_allow_html=True)
         with c2:
             st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:16px; color:#a855f7;">{cached_routes}</div>
-                <div class="metric-tile-label" style="font-size:8px;">ROUTES CACHED</div>
+            <div class="metric-tile">
+                <div class="metric-tile-value" style="color:#a855f7;">{cached_routes}</div>
+                <div class="metric-tile-label">ROUTES CACHED</div>
             </div>
             """, unsafe_allow_html=True)
         with c3:
             st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:16px; color:#4ade80;">{cache_hits}</div>
-                <div class="metric-tile-label" style="font-size:8px;">CACHE HITS</div>
+            <div class="metric-tile">
+                <div class="metric-tile-value" style="color:#34d399;">{cache_hits}</div>
+                <div class="metric-tile-label">CACHE HITS</div>
             </div>
             """, unsafe_allow_html=True)
             
         if recent_logs:
             rows_html = ""
-            for r in recent_logs[:8]:
+            for r in recent_logs[:6]:
                 ts = r.get("timestamp", "").split()[-1] if r.get("timestamp") else "--:--:--"
                 cmd = r.get("motor_cmd", "stop")
                 phase = (r.get("phase") or "IDLE")[:8]
                 dist = r.get("ultrasonic_cm", 999)
                 bias = r.get("steer_bias", 0.0)
-                
-                # Command Color
-                if "steer" in cmd or "curve" in cmd:
-                    cmd_color = "#38bdf8" # Blue
-                elif "forward" in cmd or "slow" in cmd:
-                    cmd_color = "#4ade80" # Green
-                elif "stop" in cmd or "BLOCKED" in cmd:
-                    cmd_color = "#f43f5e" # Rose
-                else:
-                    cmd_color = "#fbbf24" # Yellow
-                
+                cmd_color = "#38bdf8" if "steer" in cmd or "curve" in cmd else "#34d399" if "forward" in cmd or "slow" in cmd else "#f43f5e" if "stop" in cmd else "#fbbf24"
                 dist_str = f"{dist}cm" if dist < 900 else "--"
                 bias_str = f"b:{bias:+.2f}" if abs(bias) > 0.01 else "--"
                 
                 rows_html += f"""
-                <div class="log-line" style="display:flex; justify-content:space-between; font-size:10px; font-family:'JetBrains Mono',monospace; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+                <div class="log-line" style="display:flex; justify-content:space-between; font-size:10px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.03);">
                     <span style="color:#64748b; width:65px;">{ts}</span>
                     <span style="color:#94a3b8; font-weight:600; width:75px;">{phase}</span>
                     <span style="color:{cmd_color}; font-weight:700; flex:1;">{cmd}</span>
@@ -671,10 +1008,7 @@ with col_left:
                     <span style="color:#a78bfa; width:55px; text-align:right;">{bias_str}</span>
                 </div>
                 """
-            st.markdown(f'<div class="log-terminal" style="max-height:160px; margin-top:8px;">{rows_html}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="log-terminal" style="max-height:80px; margin-top:8px;"><div class="log-line" style="color:#334155; text-align:center;">Blackbox flight recorder standing by...</div></div>', unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="log-terminal" style="max-height:140px; margin-top:8px;">{rows_html}</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     render_mission_telemetry_cache()
@@ -682,31 +1016,27 @@ with col_left:
 
 # ==================== RIGHT COLUMN ====================
 with col_right:
-    # --- STATUS & METRICS (auto-refresh) ---
+    # --- STATUS & PRIMARY TELEMETRY ---
     @st.fragment(run_every="1s")
     def render_status_telemetry():
         s = fetch_status() or status_data
-        is_manual = s["mode"] == "manual"
+        is_manual = s.get("mode") == "manual"
+        phase = s.get("active_phase", "IDLE")
     
-        # --- STATUS READOUT ---
+        # Status Card
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">CURRENT STATUS</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="status-readout">{s["status"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="status-detail">{s["latestLog"]}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="panel-label">LIVE AUTONOMOUS STATE</div>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="status-badge">MISSION PHASE: {phase}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="status-readout">{s.get("status", "IDLE")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="status-detail">{s.get("latestLog", "")}</div>', unsafe_allow_html=True)
     
-        # --- METRICS ROW (inside the same panel) ---
+        # Metrics Bento
         m1, m2, m3 = st.columns(3)
         with m1:
             is_blocked = "IN PATH" in s["status"] or "STOP" in s["status"] or "TOO CLOSE" in s["status"]
             is_seen = s["status"] != "🔍 SEARCHING" and "PATH CLEAR" not in s["status"]
-            
-            if is_blocked:
-                obs_color, obs_text, obs_icon = "#ef4444", "BLOCKED", "🚨"
-            elif is_seen:
-                obs_color, obs_text, obs_icon = "#eab308", "DETECTED", "👁️"
-            else:
-                obs_color, obs_text, obs_icon = "#22c55e", "CLEAR", "✅"
-                
+            obs_color, obs_text, obs_icon = ("#ef4444", "BLOCKED", "🚨") if is_blocked else ("#f59e0b", "DETECTED", "👁️") if is_seen else ("#10b981", "CLEAR", "✅")
             st.markdown(f"""
             <div class="metric-tile">
                 <div class="metric-tile-value" style="color:{obs_color}">{obs_icon}</div>
@@ -715,8 +1045,8 @@ with col_right:
             """, unsafe_allow_html=True)
         with m2:
             mode_icon = "🎮" if is_manual else "🤖"
-            mode_label = "MANUAL" if is_manual else "AUTO"
-            mode_color = "#fca5a5" if is_manual else "#a5b4fc"
+            mode_label = "MANUAL" if is_manual else "AUTONOMOUS"
+            mode_color = "#f87171" if is_manual else "#38bdf8"
             st.markdown(f"""
             <div class="metric-tile">
                 <div class="metric-tile-value" style="color:{mode_color}">{mode_icon}</div>
@@ -725,69 +1055,12 @@ with col_right:
             """, unsafe_allow_html=True)
         with m3:
             cargo_state = s.get("cargo_state", "UNKNOWN")
-            if cargo_state == "LOCKED":
-                color = "#ef4444"
-                icon = "\U0001f512"  # 🔒
-            else:
-                color = "#4ade80"
-                icon = "\U0001f513"  # 🔓
+            c_color = "#ef4444" if cargo_state == "LOCKED" else "#34d399"
+            c_icon = "🔒" if cargo_state == "LOCKED" else "🔓"
             st.markdown(f"""
             <div class="metric-tile">
-                <div class="metric-tile-value" style="color:{color}">{icon} {cargo_state}</div>
-                <div class="metric-tile-label">CARGO STATUS</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-        # --- HEALTH & POWER METRICS ---
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">HEALTH, POWER & TELEMETRY</div>', unsafe_allow_html=True)
-        
-        battery = s.get("battery_level", 0)
-        temp = s.get("robot_temperature", 0.0)
-        amps = s.get("motor_current", 0.0)
-        speed = s.get("gps_speed", 0.0)
-        accuracy = s.get("gps_accuracy", 0.0)
-        
-        bat_color = "#4ade80" if battery > 20 else "#ef4444"
-        st.markdown(f"""
-        <div class="prox-bar-container">
-            <div style="font-family:'JetBrains Mono'; font-size:10px; color:#94a3b8; margin-bottom:6px;">MAIN BATTERY: <span style="color:{bat_color}; font-weight:bold;">{battery}%</span></div>
-            <div class="prox-bar-track">
-                <div class="prox-bar-fill" style="width: {battery}%; background: {bat_color};"></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        t1, t2 = st.columns(2)
-        with t1:
-            temp_color = "#ef4444" if temp > 45 else "#a1a1aa"
-            st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:18px; color:{temp_color}">{temp}<span class="metric-tile-unit">°C</span></div>
-                <div class="metric-tile-label" style="font-size:8px;">CORE TEMP</div>
-            </div>
-            """, unsafe_allow_html=True)
-            speed_color = "#4ade80" if speed > 0 else "#a1a1aa"
-            st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:18px; color:{speed_color}">{speed:.1f}<span class="metric-tile-unit">km/h</span></div>
-                <div class="metric-tile-label" style="font-size:8px;">GPS SPEED</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with t2:
-            amp_color = "#ef4444" if amps > 10 else "#a1a1aa"
-            st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:18px; color:{amp_color}">{amps}<span class="metric-tile-unit">A</span></div>
-                <div class="metric-tile-label" style="font-size:8px;">MOTOR DRAW</div>
-            </div>
-            """, unsafe_allow_html=True)
-            acc_color = "#4ade80" if accuracy > 0 and accuracy < 10 else "#eab308" if accuracy >= 10 else "#a1a1aa"
-            st.markdown(f"""
-            <div class="metric-tile" style="padding: 8px;">
-                <div class="metric-tile-value" style="font-size:18px; color:{acc_color}">±{accuracy:.1f}<span class="metric-tile-unit">m</span></div>
-                <div class="metric-tile-label" style="font-size:8px;">GPS ACCURACY</div>
+                <div class="metric-tile-value" style="color:{c_color}">{c_icon}</div>
+                <div class="metric-tile-label">{cargo_state}</div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -795,11 +1068,10 @@ with col_right:
     
     render_status_telemetry()
 
-    # --- MODE & FLEET CONTROL ---
+    # --- FLEET MODE CONTROLS ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">FLEET COMMAND & MODE CONTROL</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">FLEET COMMAND & DISPATCH</div>', unsafe_allow_html=True)
     
-    # Handle the pop-up logic after rerun
     if st.session_state.get("open_manual_drive"):
         components.html(f"<script>window.open('{BACKEND_URL}/drive', '_blank');</script>", height=0)
         st.session_state["open_manual_drive"] = False
@@ -810,11 +1082,11 @@ with col_right:
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
         if is_manual_now:
-            if st.button("🔄  AUTONOMOUS", use_container_width=True, key="mode_btn"):
+            if st.button("🤖  AUTONOMOUS MODE", use_container_width=True, key="mode_btn"):
                 toggle_mode("autonomous")
                 st.rerun()
         else:
-            if st.button("🚨  OVERRIDE", use_container_width=True, key="mode_btn"):
+            if st.button("🚨  MANUAL OVERRIDE", use_container_width=True, key="mode_btn"):
                 toggle_mode("manual")
                 st.session_state["open_manual_drive"] = True
                 st.rerun()
@@ -825,208 +1097,22 @@ with col_right:
                 res = requests.post(f"{BACKEND_URL}/backend/return_to_base", timeout=3)
                 if res.status_code == 200:
                     st.toast("🚀 Returning to Base Charging Station!", icon="🏠")
-                else:
-                    st.warning("Could not initiate return to base")
             except Exception as e:
                 st.error(f"Error: {e}")
             st.rerun()
             
-    st.markdown('<div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;"></div>', unsafe_allow_html=True)
-    
+    st.markdown('<div style="margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;"></div>', unsafe_allow_html=True)
     routing_choice = st.selectbox("Routing Engine", ["Google Maps API", "Internal Graph (JUET)"], index=0, key="routing_engine")
     engine_val = "google" if "Google" in routing_choice else "self"
-    
-    # Send choice to backend
     if "last_routing_engine" not in st.session_state or st.session_state["last_routing_engine"] != engine_val:
         st.session_state["last_routing_engine"] = engine_val
         try:
             requests.post(f"{BACKEND_URL}/backend/set_routing_engine", json={"engine": engine_val}, timeout=2)
         except Exception:
             pass
-
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- IN-DASHBOARD EMERGENCY MANUAL REMOTE JOYSTICK ---
-    if is_manual_now:
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="panel-label">🕹️ EMERGENCY REMOTE OVERRIDE CONTROLLER</div>', unsafe_allow_html=True)
-        
-        joystick_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                * {{ box-sizing: border-box; user-select: none; margin: 0; padding: 0; }}
-                body {{ background: transparent; font-family: 'Inter', -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; }}
-                .pad-container {{ display: grid; grid-template-columns: repeat(3, 68px); grid-template-rows: repeat(3, 56px); gap: 8px; margin: 8px auto; }}
-                .pad-btn {{
-                    background: rgba(39, 39, 42, 0.8);
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    color: #ededed;
-                    border-radius: 12px;
-                    font-size: 18px;
-                    font-weight: 700;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    transition: all 0.1s ease;
-                    touch-action: manipulation;
-                }}
-                .pad-btn:hover {{ background: rgba(63, 63, 70, 0.9); border-color: rgba(255, 255, 255, 0.25); }}
-                .pad-btn:active, .pad-btn.active {{
-                    background: #3b82f6;
-                    color: #ffffff;
-                    border-color: #60a5fa;
-                    transform: scale(0.94);
-                    box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
-                }}
-                .btn-stop {{
-                    background: rgba(225, 29, 72, 0.2);
-                    border-color: rgba(225, 29, 72, 0.4);
-                    color: #fb7185;
-                    font-size: 13px;
-                    font-weight: 800;
-                    letter-spacing: 0.5px;
-                }}
-                .btn-stop:hover {{ background: rgba(225, 29, 72, 0.35); }}
-                .btn-stop:active, .btn-stop.active {{
-                    background: #e11d48;
-                    color: #ffffff;
-                    box-shadow: 0 0 16px rgba(225, 29, 72, 0.7);
-                }}
-                .aux-row {{ display: flex; gap: 8px; width: 100%; max-width: 220px; margin-top: 6px; }}
-                .aux-btn {{
-                    flex: 1;
-                    padding: 8px;
-                    background: rgba(30, 41, 59, 0.6);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: 8px;
-                    color: #94a3b8;
-                    font-size: 11px;
-                    font-weight: 600;
-                    text-align: center;
-                    cursor: pointer;
-                    transition: all 0.12s;
-                }}
-                .aux-btn:hover {{ background: rgba(51, 65, 85, 0.8); color: #f8fafc; }}
-                .aux-btn:active {{ background: #0284c7; color: white; }}
-                .status-line {{ font-family: monospace; font-size: 11px; color: #64748b; margin-top: 8px; text-align: center; }}
-            </style>
-        </head>
-        <body>
-            <div class="pad-container">
-                <div></div>
-                <button class="pad-btn" id="btn-fwd" title="Forward (W or ↑)">▲</button>
-                <div></div>
-
-                <button class="pad-btn" id="btn-left" title="Left (A or ←)">◀</button>
-                <button class="pad-btn btn-stop" id="btn-stop" title="Emergency Stop (Space)">STOP</button>
-                <button class="pad-btn" id="btn-right" title="Right (D or →)">▶</button>
-
-                <div></div>
-                <button class="pad-btn" id="btn-rev" title="Reverse (S or ↓)">▼</button>
-                <div></div>
-            </div>
-
-            <div class="aux-row">
-                <button class="aux-btn" id="btn-beep">🔊 BEEP</button>
-                <button class="aux-btn" id="btn-slow">⚡ SLOW</button>
-            </div>
-            <div class="aux-row" style="margin-top:6px;">
-                <button class="aux-btn" id="btn-scan-l" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">⬅️ SCAN L</button>
-                <button class="aux-btn" id="btn-scan-c" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">⏺️ SCAN C</button>
-                <button class="aux-btn" id="btn-scan-r" style="background:rgba(13,148,136,0.2); border-color:rgba(13,148,136,0.4); color:#5eead4;">➡️ SCAN R</button>
-            </div>
-            <div class="status-line" id="cmd-status">READY: Keys W/A/S/D or Arrows</div>
-
-            <script>
-                const BACKEND = "{BACKEND_URL}";
-                let isSending = false;
-
-                function sendCmd(cmd) {{
-                    const el = document.getElementById("cmd-status");
-                    el.innerText = "COMMAND: " + cmd.toUpperCase();
-                    el.style.color = cmd === "stop" ? "#f43f5e" : "#38bdf8";
-
-                    if (cmd === "beep") {{
-                        fetch(BACKEND + "/backend/beep", {{ method: "POST" }}).catch(() => {{}});
-                        return;
-                    }}
-
-                    fetch(BACKEND + "/backend/manual_control", {{
-                        method: "POST",
-                        headers: {{ "Content-Type": "application/json" }},
-                        body: JSON.stringify({{ cmd: cmd }})
-                    }}).catch(err => {{
-                        el.innerText = "ERR: " + err.message;
-                        el.style.color = "#ef4444";
-                    }});
-                }}
-
-                function bindBtn(id, cmd) {{
-                    const btn = document.getElementById(id);
-                    if (!btn) return;
-                    let holdInterval = null;
-                    const startAction = (e) => {{
-                        e.preventDefault();
-                        sendCmd(cmd);
-                        if (cmd !== "stop" && cmd !== "beep" && !cmd.startsWith("scan")) {{
-                            if (holdInterval) clearInterval(holdInterval);
-                            holdInterval = setInterval(() => sendCmd(cmd), 300);
-                        }}
-                    }};
-                    const stopAction = (e) => {{
-                        if (holdInterval) {{
-                            clearInterval(holdInterval);
-                            holdInterval = null;
-                        }}
-                        if (cmd !== "stop" && cmd !== "beep" && !cmd.startsWith("scan")) {{
-                            sendCmd("stop");
-                        }}
-                    }};
-                    btn.addEventListener("mousedown", startAction);
-                    btn.addEventListener("mouseup", stopAction);
-                    btn.addEventListener("mouseleave", stopAction);
-                    btn.addEventListener("touchstart", startAction);
-                    btn.addEventListener("touchend", stopAction);
-                }}
-
-                bindBtn("btn-fwd", "forward");
-                bindBtn("btn-left", "left");
-                bindBtn("btn-stop", "stop");
-                bindBtn("btn-right", "right");
-                bindBtn("btn-rev", "reverse");
-                bindBtn("btn-beep", "beep");
-                bindBtn("btn-slow", "slow");
-                bindBtn("btn-scan-l", "scan_left");
-                bindBtn("btn-scan-c", "scan_center");
-                bindBtn("btn-scan-r", "scan_right");
-
-                // Keyboard Controls
-                window.addEventListener("keydown", (e) => {{
-                    if (e.repeat) return;
-                    const key = e.key.toLowerCase();
-                    if (key === "arrowup" || key === "w") {{ document.getElementById("btn-fwd").classList.add("active"); sendCmd("forward"); }}
-                    else if (key === "arrowdown" || key === "s") {{ document.getElementById("btn-rev").classList.add("active"); sendCmd("reverse"); }}
-                    else if (key === "arrowleft" || key === "a") {{ document.getElementById("btn-left").classList.add("active"); sendCmd("left"); }}
-                    else if (key === "arrowright" || key === "d") {{ document.getElementById("btn-right").classList.add("active"); sendCmd("right"); }}
-                    else if (key === " " || key === "escape") {{ document.getElementById("btn-stop").classList.add("active"); sendCmd("stop"); }}
-                    else if (key === "b" || key === "h") {{ sendCmd("beep"); }}
-                }});
-
-                window.addEventListener("keyup", (e) => {{
-                    document.querySelectorAll(".pad-btn").forEach(b => b.classList.remove("active"));
-                }});
-            </script>
-        </body>
-        </html>
-        """
-        components.html(joystick_html, height=260)
-        st.markdown(f'<a href="{BACKEND_URL}/drive" target="_blank" style="display:block; width:100%; text-align:center; background:rgba(255, 255, 255, 0.05); border:1px solid rgba(255, 255, 255, 0.1); color:#94a3b8; padding:8px; border-radius:8px; font-size:11px; font-weight:600; text-decoration:none; font-family:Inter; margin-top:4px;">↗ POP OUT STANDALONE DRIVE PAD</a>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- CARGO LATCH & SCANNABLE QR PASS ---
+    # --- SCANNABLE CARGO SECURITY QR PASS ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="panel-label">CARGO LATCH & SCANNABLE QR PASS</div>', unsafe_allow_html=True)
     
@@ -1034,25 +1120,41 @@ with col_right:
     is_unlocked = cargo_status == "UNLOCKED"
     
     qr_endpoint = f"{BACKEND_URL}/backend/verify_qr?cart_id=CART_01&action=unlock"
-    qr_img_src = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={qr_endpoint}&bgcolor=18-18-24&color=4ade80"
+    qr_img_src = f"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data={qr_endpoint}&bgcolor=11-16-26&color=38bdf8"
     
     col_qr, col_latch_act = st.columns([1, 1], gap="medium")
     with col_qr:
         st.markdown(f"""
-        <div style="text-align: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; position: relative;">
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38bdf8; margin-bottom: 8px; font-weight: 600; letter-spacing: 0.5px;">📱 SCAN TO UNLOCK SERVO</div>
-            <div style="position: relative; display: inline-block; border-radius: 12px; overflow: hidden; border: 2px solid #22c55e; box-shadow: 0 0 20px rgba(34, 197, 94, 0.25);">
-                <img src="{qr_img_src}" alt="Scan QR to Unlock" style="display: block; width: 135px; height: 135px;" />
+        <style>
+            @keyframes laserSweep {{
+                0% {{ top: 4px; opacity: 0; }}
+                20% {{ opacity: 1; }}
+                80% {{ opacity: 1; }}
+                100% {{ top: 128px; opacity: 0; }}
+            }}
+            .laser-line {{
+                position: absolute;
+                left: 0; right: 0; height: 2px;
+                background: linear-gradient(90deg, transparent, #38bdf8, #06b6d4, transparent);
+                box-shadow: 0 0 12px #38bdf8, 0 0 20px #06b6d4;
+                animation: laserSweep 2s ease-in-out infinite;
+            }}
+        </style>
+        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 12px; position: relative;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #38bdf8; margin-bottom: 8px; font-weight: 700; letter-spacing: 0.8px;">📱 SCAN WITH PHONE CAMERA</div>
+            <div style="position: relative; display: inline-block; border-radius: 12px; overflow: hidden; border: 2px solid #06b6d4; box-shadow: 0 0 20px rgba(6, 182, 212, 0.35);">
+                <div class="laser-line"></div>
+                <img src="{qr_img_src}" alt="Scan to Unlock" style="display: block; width: 130px; height: 130px;" />
             </div>
-            <div style="font-size: 9px; color: #94a3b8; margin-top: 8px; font-family: Inter;">Point any mobile camera to open lid (90°)</div>
+            <div style="font-size: 9px; color: #94a3b8; margin-top: 8px;">Opens hardware latch to 90°</div>
         </div>
         """, unsafe_allow_html=True)
         
     with col_latch_act:
-        state_badge = '<span style="color:#4ade80; font-weight:bold; font-size:14px;">🔓 UNLOCKED (90°)</span>' if is_unlocked else '<span style="color:#ef4444; font-weight:bold; font-size:14px;">🔒 LOCKED (0°)</span>'
+        state_badge = '<span style="color:#34d399; font-weight:bold; font-size:15px;">🔓 UNLOCKED (90°)</span>' if is_unlocked else '<span style="color:#f87171; font-weight:bold; font-size:15px;">🔒 LOCKED (0°)</span>'
         st.markdown(f"""
-        <div style="padding: 4px 0 10px 0;">
-            <div style="font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono';">LATCH HARDWARE STATE:</div>
+        <div style="padding: 4px 0 12px 0;">
+            <div style="font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono';">HARDWARE SERVO ANGLE:</div>
             <div style="margin: 4px 0 12px 0;">{state_badge}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1077,7 +1179,7 @@ with col_right:
 
     # --- SATELLITE & CYBER DARK TRACKING MAP ---
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-label">LIVE SATELLITE & MISSION ROUTE TRACKING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-label">GOOGLE MAPS SATELLITE & WAYPOINT TRACKING</div>', unsafe_allow_html=True)
     
     GMAPS_API_KEY = os.environ.get("GMAPS_API_KEY", "AIzaSyBX0xNBFK24V2DZgMQHFku3tWcJWtVjgds")
     
@@ -1086,17 +1188,17 @@ with col_right:
     <html>
     <head>
         <style>
-            * {{ box-sizing: border-box; }}
-            #map-wrapper {{ position: relative; width: 100%; height: 380px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); }}
+            * {{ box-sizing: border-box; margin:0; padding:0; }}
+            #map-wrapper {{ position: relative; width: 100%; height: 380px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }}
             #map {{ height: 100%; width: 100%; }}
             .map-ctrl-bar {{
                 position: absolute;
-                top: 10px;
-                right: 10px;
+                top: 12px;
+                right: 12px;
                 z-index: 10;
                 display: flex;
                 gap: 6px;
-                background: rgba(10, 10, 15, 0.85);
+                background: rgba(10, 14, 24, 0.88);
                 backdrop-filter: blur(12px);
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 8px;
@@ -1106,33 +1208,32 @@ with col_right:
                 background: transparent;
                 border: none;
                 color: #94a3b8;
-                font-family: 'Inter', sans-serif;
+                font-family: 'Outfit', sans-serif;
                 font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
+                font-weight: 700;
+                padding: 5px 10px;
                 border-radius: 6px;
                 cursor: pointer;
                 transition: all 0.15s;
             }}
             .map-type-btn.active {{
-                background: #3b82f6;
-                color: #ffffff;
+                background: #06b6d4;
+                color: #000;
             }}
             .phase-hud {{
                 position: absolute;
                 bottom: 12px;
                 left: 12px;
                 z-index: 10;
-                background: rgba(10, 10, 15, 0.85);
-                backdrop-filter: blur(12px);
+                background: rgba(10, 14, 24, 0.88);
+                backdrop-filter: blur(14px);
                 border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 8px;
                 padding: 6px 14px;
                 font-family: 'JetBrains Mono', monospace;
                 font-size: 11px;
                 color: #38bdf8;
-                font-weight: 600;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                font-weight: 700;
                 display: flex;
                 align-items: center;
                 gap: 8px;
@@ -1141,8 +1242,8 @@ with col_right:
                 width: 7px;
                 height: 7px;
                 border-radius: 50%;
-                background: #22c55e;
-                box-shadow: 0 0 8px #22c55e;
+                background: #10b981;
+                box-shadow: 0 0 8px #10b981;
             }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
@@ -1153,7 +1254,7 @@ with col_right:
             }});
         </script>
     </head>
-    <body style="margin:0; padding:0; background:#0a0f1a;">
+    <body>
         <div id="map-wrapper">
             <div class="map-ctrl-bar">
                 <button class="map-type-btn active" id="btn-dark" onclick="setMode('dark')">Dark Cyber</button>
@@ -1170,13 +1271,13 @@ with col_right:
             let map, botMarker, chargingMarker, sourceMarker, destMarker, routePoly;
             
             const darkMapStyles = [
-                {{ elementType: 'geometry', stylers: [{{ color: '#18181b' }}] }},
-                {{ elementType: 'labels.text.stroke', stylers: [{{ color: '#09090b' }}] }},
-                {{ elementType: 'labels.text.fill', stylers: [{{ color: '#a1a1aa' }}] }},
-                {{ featureType: 'road', elementType: 'geometry', stylers: [{{ color: '#27272a' }}] }},
-                {{ featureType: 'road.highway', elementType: 'geometry', stylers: [{{ color: '#3f3f46' }}] }},
-                {{ featureType: 'water', elementType: 'geometry', stylers: [{{ color: '#09090b' }}] }},
-                {{ featureType: 'poi', elementType: 'labels.text.fill', stylers: [{{ color: '#71717a' }}] }}
+                {{ elementType: 'geometry', stylers: [{{ color: '#0d131f' }}] }},
+                {{ elementType: 'labels.text.stroke', stylers: [{{ color: '#070a10' }}] }},
+                {{ elementType: 'labels.text.fill', stylers: [{{ color: '#94a3b8' }}] }},
+                {{ featureType: 'road', elementType: 'geometry', stylers: [{{ color: '#1e293b' }}] }},
+                {{ featureType: 'road.highway', elementType: 'geometry', stylers: [{{ color: '#334155' }}] }},
+                {{ featureType: 'water', elementType: 'geometry', stylers: [{{ color: '#070a10' }}] }},
+                {{ featureType: 'poi', elementType: 'labels.text.fill', stylers: [{{ color: '#64748b' }}] }}
             ];
 
             function setMode(mode) {{
@@ -1209,9 +1310,9 @@ with col_right:
                     icon: {{
                         path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
                         scale: 7,
-                        fillColor: '#22c55e',
+                        fillColor: '#10b981',
                         fillOpacity: 1,
-                        strokeColor: '#09090b',
+                        strokeColor: '#070a10',
                         strokeWeight: 2,
                         rotation: 0,
                     }},
@@ -1225,15 +1326,15 @@ with col_right:
                     icon: {{
                         path: google.maps.SymbolPath.CIRCLE,
                         scale: 9,
-                        fillColor: '#06b6d4', // Cyan
+                        fillColor: '#06b6d4',
                         fillOpacity: 1,
                         strokeColor: '#083344',
                         strokeWeight: 3,
                     }},
-                    title: "Charging Station (Base Dock)"
+                    title: "Base Dock Charging Station"
                 }});
 
-                // Source (Pickup) Circle Marker - Matches Mobile App
+                // Source (Pickup) White Circle Marker
                 sourceMarker = new google.maps.Marker({{
                     map: map,
                     icon: {{
@@ -1241,13 +1342,13 @@ with col_right:
                         scale: 8,
                         fillColor: '#ffffff',
                         fillOpacity: 1,
-                        strokeColor: '#27272a',
+                        strokeColor: '#1e293b',
                         strokeWeight: 3,
                     }},
                     title: "Pickup Location"
                 }});
 
-                // Destination (Dropoff) Amber Circle Marker - Matches Mobile App
+                // Destination (Dropoff) Amber Circle Marker
                 destMarker = new google.maps.Marker({{
                     map: map,
                     icon: {{
@@ -1255,16 +1356,16 @@ with col_right:
                         scale: 8,
                         fillColor: '#f59e0b',
                         fillOpacity: 1,
-                        strokeColor: '#27272a',
+                        strokeColor: '#1e293b',
                         strokeWeight: 3,
                     }},
                     title: "Dropoff Location"
                 }});
                 
-                // Route Polyline - Dense Google Maps Path
+                // Dense Google Maps Route Polyline
                 routePoly = new google.maps.Polyline({{
                     geodesic: true,
-                    strokeColor: '#3b82f6',
+                    strokeColor: '#38bdf8',
                     strokeOpacity: 0.9,
                     strokeWeight: 5,
                     map: map,
