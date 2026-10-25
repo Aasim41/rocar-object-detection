@@ -647,8 +647,9 @@ def yolo_loop():
                 frame = latest_frame.copy() if latest_frame is not None else None
             
             if frame is None:
-                time.sleep(0.02)
-                continue
+                # If camera is offline, create a lightweight placeholder frame so GPS autonomous navigation continues!
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, "VISION OFFLINE - GPS NAVIGATION ACTIVE", (30, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
             
             if current_mode == "manual":
                 # In manual mode: bypass YOLO to give maximum FPS and 0ms latency

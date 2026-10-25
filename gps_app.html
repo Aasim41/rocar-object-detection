@@ -314,6 +314,9 @@
     <script>
         // DOM Elements
         const elIp = document.getElementById('backend-ip');
+        if (window.location.hostname && window.location.hostname !== '' && window.location.hostname !== 'localhost') {
+            elIp.value = window.location.hostname;
+        }
         const btnConnect = document.getElementById('btn-connect');
         const btnTrack = document.getElementById('btn-track');
         const wsDot = document.getElementById('ws-dot');
