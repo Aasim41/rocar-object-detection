@@ -126,6 +126,23 @@ def connect_hardware():
     except Exception as e:
         ws_connected = False
         add_log(f"Hardware port {BOT_WS_URL} offline: {e}")
+    
+    # Auto-reconnect thread that automatically reconnects when plugged in
+    threading.Thread(target=hardware_auto_reconnect_loop, daemon=True).start()
+
+def hardware_auto_reconnect_loop():
+    """Silently tries to reconnect whenever USB cable is plugged into the laptop."""
+    global ser_conn, ws_connected
+    while True:
+        if not ws_connected or ser_conn is None or not ser_conn.is_open:
+            try:
+                ser_conn = serial.Serial(BOT_WS_URL, BAUD_RATE, timeout=0.1)
+                ws_connected = True
+                add_log(f"Hardware reconnected on {BOT_WS_URL} @ {BAUD_RATE} baud")
+                threading.Thread(target=serial_listener_loop, daemon=True).start()
+            except Exception:
+                pass
+        time.sleep(2.0)
 
 
 def serial_listener_loop():
