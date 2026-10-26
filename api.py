@@ -299,6 +299,7 @@ def process_bot_message(msg: str):
         blocked_until = time.time() + 1.5
         current_status = "🚨 OBSTACLE BLOCKED"
         add_log("🚨 Hardware Reflex: Obstacle within 15cm!")
+        print(f"🚨 [OBSTACLE DETECTED] Ultrasonic distance is {current_distance_cm} cm (< 18 cm)! Robot emergency brake engaged.")
         ts = datetime.now().strftime("%H:%M:%S")
         esp_commands.append(f"[{ts}] RECV: BLOCKED")
         if len(esp_commands) > 30: esp_commands.pop(0)

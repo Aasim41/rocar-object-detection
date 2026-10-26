@@ -22,15 +22,15 @@
   #include <Servo.h>
 
   // Left Motor Driver Logic Pins
-  #define IN1 7
-  #define IN2 8
+  #define IN1 2
+  #define IN2 4
 
   // Right Motor Driver Logic Pins
   #define IN3 11
   #define IN4 12
 
   // PWM Speed Pins
-  #define ENA 5
+  #define ENA 3
   #define ENB 6
 
   #define CARGO_SERVO_PIN  10
@@ -39,7 +39,7 @@
   #define TRIG_PIN  A0
   #define ECHO_PIN  A1
 
-  #define BUZZER_PIN 2
+  #define BUZZER_PIN A2
 #endif
 
 // Speed Calibration (0 to 255)
