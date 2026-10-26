@@ -46,8 +46,7 @@ async def lifespan(app: FastAPI):
     # Start the bot hardware sender queue worker
     threading.Thread(target=esp32_sender_worker, daemon=True).start()
     
-    # Try connecting to Arduino via phone relay (and keep retrying automatically)
-    threading.Thread(target=connect_esp32, daemon=True).start()
+    # Auto-reconnect worker handles initial connection + continuous monitoring
     threading.Thread(target=esp32_reconnect_worker, daemon=True).start()
     
     # Start camera capture thread
@@ -102,6 +101,7 @@ class ModeRequest(BaseModel):
 class ControlRequest(BaseModel):
     action: Optional[str] = None
     cmd: Optional[str] = None
+    command: Optional[str] = None
 
 class OrderRequest(BaseModel):
     amount_inr: float
@@ -367,23 +367,37 @@ def esp32_sender_worker():
                 if is_serial_bot and bot_serial and bot_serial.is_open:
                     bot_serial.write((cmd + "\n").encode("utf-8"))
                     bot_serial.flush()
+                    print(f"🚀 [PC -> BOT SERIAL] {cmd.upper()}")
                 elif is_tcp_bot and bot_socket:
                     bot_socket.sendall((cmd + "\n").encode("utf-8"))
+                    print(f"🚀 [PC -> BOT TCP] {cmd.upper()}")
                 elif ws is not None:
                     ws.send(cmd)
+                    print(f"🚀 [PC -> BOT WS] {cmd.upper()}")
             except Exception as e:
+                print(f"❌ [BOT SEND ERROR] {e}")
                 if ws_connected:
                     ws_connected = False
+                    if bot_socket:
+                        try:
+                            bot_socket.close()
+                        except Exception:
+                            pass
+                        bot_socket = None
                     add_log(f"⚠️ Bot send failed: {e}. Reconnecting...")
         esp32_cmd_queue.task_done()
 
 def connect_esp32():
     """Connect to Arduino via Direct USB Serial, Phone-Relay WebSocket, or raw TCP server."""
     global ws, ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
-    if not BOT_WS_URL:
+    if ws_connected:
         return
         
-    url = BOT_WS_URL.strip()
+    url = os.environ.get("BOT_WS_URL")
+    if not url:
+        current_ip = get_phone_hotspot_ip()
+        url = f"tcp://{current_ip}:8765"
+    url = url.strip()
 
     # --- Direct USB Serial Mode (Laptop connected to Arduino via USB Cable) ---
     if url.upper().startswith("COM") or url.startswith("/dev/") or url.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL"):
@@ -424,6 +438,12 @@ def connect_esp32():
     # --- TCP Socket Mode (TCPUART on Phone) ---
     if url.startswith("tcp://"):
         try:
+            if bot_socket:
+                try:
+                    bot_socket.close()
+                except Exception:
+                    pass
+                bot_socket = None
             clean_url = url.replace("tcp://", "")
             host, port_str = clean_url.split(":")
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -436,9 +456,15 @@ def connect_esp32():
             ws_connected = True
             add_log(f"✅ Connected to bot hardware via TCP at {url}")
             print(f"✅ Connected to bot hardware via TCP at {url}")
+            return
         except Exception as e:
             ws_connected = False
-            bot_socket = None
+            if bot_socket:
+                try:
+                    bot_socket.close()
+                except Exception:
+                    pass
+                bot_socket = None
             # Fallback: check if an Arduino USB serial port is plugged in!
             try:
                 import serial
@@ -475,6 +501,7 @@ def connect_esp32():
             ws_connected = True
             add_log(f"✅ Connected to bot hardware at {url}")
             print(f"✅ Connected to bot hardware at {url}")
+            return
         except Exception as e:
             ws_connected = False
             ws = None
@@ -482,13 +509,13 @@ def connect_esp32():
 def esp32_reconnect_worker():
     """Continuous background worker to ensure auto-reconnect to bot hardware."""
     while True:
-        if not ws_connected and (BOT_WS_URL.upper().startswith("COM") or BOT_WS_URL.startswith("/dev/") or BOT_WS_URL.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL") or BOT_WS_URL.startswith("tcp://") or WS_AVAILABLE):
+        if not ws_connected:
             if esp32_reconnect_lock.acquire(blocking=False):
                 try:
                     connect_esp32()
                 finally:
                     esp32_reconnect_lock.release()
-        time.sleep(3.0)
+        time.sleep(2.0)
 
 def send_esp32(cmd: str):
     """Queue a command to Arduino via Serial/WebSocket/TCP without blocking the AI loop."""
@@ -511,6 +538,8 @@ def send_esp32(cmd: str):
         last_webots_steer = 0.3
     
     if not ws_connected:
+        if cmd not in ("stop", "ping"):
+            print(f"⚠️ [HARDWARE DROPPED] '{cmd.upper()}' — Bot hardware not connected")
         return
         
     try:
@@ -528,18 +557,31 @@ def esp32_listener():
                 if is_serial_bot and bot_serial and bot_serial.is_open:
                     line = bot_serial.readline().decode("utf-8", errors="ignore").strip()
                     if line:
+                        if not line.startswith("DIST:"):
+                            print(f"📥 [BOT -> PC] {line}")
                         process_bot_message(line)
                     else:
                         time.sleep(0.01)
                 elif is_tcp_bot and bot_socket:
                     chunk = bot_socket.recv(1024).decode("utf-8", errors="ignore")
                     if not chunk:
+                        print("⚠️ [TCP] Remote closed connection.")
                         ws_connected = False
+                        if bot_socket:
+                            try:
+                                bot_socket.close()
+                            except Exception:
+                                pass
+                            bot_socket = None
                         continue
                     tcp_buf += chunk
                     while "\n" in tcp_buf:
                         line, tcp_buf = tcp_buf.split("\n", 1)
-                        process_bot_message(line)
+                        line = line.strip()
+                        if line:
+                            if not line.startswith("DIST:"):
+                                print(f"📥 [BOT -> PC] {line}")
+                            process_bot_message(line)
                 elif ws is not None:
                     msg = ws.recv()
                     if msg:
@@ -1196,6 +1238,9 @@ async def get_status():
         "latestLog": latest_log,
         "obstacle_detected": obstacle_detected,
         "distance_cm": current_distance_cm,
+        "dist_left_cm": dist_left_cm,
+        "dist_center_cm": dist_center_cm,
+        "dist_right_cm": dist_right_cm,
         "esp32_connected": ws_connected,
         "gps_app_connected": gps_app_connected,
         "gps_speed": gps_speed,
@@ -1247,7 +1292,7 @@ async def manual_control(req: ControlRequest):
                 break
         add_log("🎮 Switched to MANUAL mode from controller input")
     
-    raw = req.action or req.cmd or ""
+    raw = req.action or req.cmd or req.command or ""
     cmd = raw.lower().strip()
     if cmd == "open_lid": cmd = "unlock"
     if cmd == "close_lid": cmd = "lock"
@@ -1773,6 +1818,9 @@ async def broadcast_to_dashboard():
         "latestLog": latest_log,
         "obstacle_detected": obstacle_detected,
         "distance_cm": current_distance_cm,
+        "dist_left_cm": dist_left_cm,
+        "dist_center_cm": dist_center_cm,
+        "dist_right_cm": dist_right_cm,
         "esp32_connected": ws_connected,
         "gps_app_connected": gps_app_connected,
         "gps_speed": gps_speed,
@@ -2101,4 +2149,4 @@ async def dashboard_broadcast_loop():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("api:app", host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port)

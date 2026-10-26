@@ -632,7 +632,7 @@
             timedTimer = setTimeout(() => {
                 clearInterval(timedInterval);
                 sendCmd('stop');
-                logToConsole(`TIMED ${action.toUpperCase()} COMPLETED (STOPPED).`, 'normal'); dawwsswswswswsw
+                logToConsole(`TIMED ${action.toUpperCase()} COMPLETED (STOPPED).`, 'normal');
             }, durationMs);
         }
 
@@ -727,6 +727,18 @@
                     s.innerText = val + " cm";
                     s.style.color = data.distance_cm < 20 ? "#ef4444" : (data.distance_cm < 50 ? "#f59e0b" : "#22c55e");
                 }
+                if(data.dist_left_cm !== undefined && data.dist_left_cm < 999) {
+                    let sl = document.getElementById('sonar-left');
+                    if(sl) sl.innerText = data.dist_left_cm + " cm";
+                }
+                if(data.dist_center_cm !== undefined && data.dist_center_cm < 999) {
+                    let sc = document.getElementById('sonar-center');
+                    if(sc) sc.innerText = data.dist_center_cm + " cm";
+                }
+                if(data.dist_right_cm !== undefined && data.dist_right_cm < 999) {
+                    let sr = document.getElementById('sonar-right');
+                    if(sr) sr.innerText = data.dist_right_cm + " cm";
+                }
 
                 // Obstacle Alert
                 let ob = document.getElementById('obstacle-badge');
@@ -803,6 +815,20 @@
                 document.querySelectorAll('.dbtn').forEach(b => b.classList.remove('active'));
             } else if(k === ' ') {
                 document.getElementById('dpad-stop').classList.remove('active');
+            }
+        });
+
+        // Safety: Stop on global mouseup/touchend if user drags pointer off buttons
+        window.addEventListener('mouseup', () => {
+            if(isDriving && !activeKey) {
+                stopDrive();
+                document.querySelectorAll('.dbtn').forEach(b => b.classList.remove('active'));
+            }
+        });
+        window.addEventListener('touchend', () => {
+            if(isDriving && !activeKey) {
+                stopDrive();
+                document.querySelectorAll('.dbtn').forEach(b => b.classList.remove('active'));
             }
         });
     </script>
