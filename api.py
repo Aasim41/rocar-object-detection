@@ -568,6 +568,43 @@ async def manual_control(request: Request):
     return {"status": "ok", "command": cmd}
 
 
+@app.get("/backend/telemetry/stats")
+async def get_telemetry_stats():
+    """Returns telemetry logs and cached route statistics from SQLite."""
+    try:
+        return telemetry_db.get_stats()
+    except Exception:
+        return {"total_logs": 0, "cached_routes": 0, "cache_hits": 0, "recent_logs": []}
+
+
+@app.post("/backend/beep")
+async def trigger_beep():
+    """Trigger buzzer chime on Arduino."""
+    send_hardware_cmd("beep")
+    return {"status": "ok"}
+
+
+@app.post("/backend/pack_order")
+async def pack_order():
+    """Locks the cargo latch to 0°."""
+    global cargo_state
+    cargo_state = "LOCKED"
+    send_hardware_cmd("lock")
+    add_log("Cargo latch secured to 0° (Locked)")
+    await broadcast_telemetry()
+    return {"status": "ok", "cargo_state": "LOCKED"}
+
+
+@app.post("/backend/set_routing_engine")
+async def set_routing(request: Request):
+    """Toggles routing engine between google and self."""
+    body = await request.json()
+    engine = body.get("engine", "google")
+    set_routing_engine(engine)
+    add_log(f"Routing engine switched to: {engine.upper()}")
+    return {"status": "ok", "engine": engine}
+
+
 # ============================================================
 # Autonomous Mission Lifecycle Endpoints
 # ============================================================
