@@ -1,8 +1,8 @@
 """
 AutoDrop Autonomous Ground Vehicle — Fleet Controller & API Gateway
 =====================================================================
-Core backend for autonomous delivery cart:
-- Hardware Serial Link (COM7 @ 115200 baud): Motors, Latch Servo, Ultrasonic Radar
+Universal Controller supporting Phone Bridge (TCP/WS) & Direct USB Serial:
+- Auto-detects phone hotspot IP for wireless cart operation (Phone + OTG)
 - YOLOv8 Real-time Obstacle Detection & Proportional Braking
 - Geodesic GPS Waypoint Following & Self-Return Navigation
 - WebSockets for Streamlit GSAP Mission Control & React Delivery App
@@ -17,6 +17,7 @@ import math
 import os
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -30,6 +31,12 @@ from pydantic import BaseModel
 import serial
 from ultralytics import YOLO
 
+try:
+    import websocket
+    WS_CLIENT_AVAILABLE = True
+except ImportError:
+    WS_CLIENT_AVAILABLE = False
+
 # Project Modules
 from navigation.decode_route import dense_interpolate_points
 from navigation.fnpp import calculate_distance, to_tuple
@@ -38,11 +45,33 @@ from navigation.pipeline import fetch_routes, set_routing_engine
 import telemetry_db
 
 # ============================================================
-# Core Configuration
+# Auto-Detect Phone Hotspot IP & Configuration
 # ============================================================
-BOT_WS_URL = os.environ.get("BOT_WS_URL", "COM7")
+def get_phone_hotspot_ip():
+    """Auto-detect phone hotspot IP address from network default gateway."""
+    try:
+        out = subprocess.check_output("ipconfig", text=True)
+        m = re.findall(r'(?:Default Gateway[.\s:]+)(?:fe80[^\r\n]+\r?\n\s+)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', out)
+        if m:
+            return m[0]
+    except Exception:
+        pass
+    return "10.236.135.235"
+
+AUTO_PHONE_IP = get_phone_hotspot_ip()
+print(f"📡 Auto-detected Phone Hotspot IP: {AUTO_PHONE_IP}")
+
+# Hardware Link: Defaults to Phone TCP bridge if running on phone
+BOT_WS_URL = os.environ.get("BOT_WS_URL", f"tcp://{AUTO_PHONE_IP}:8765").strip()
 BAUD_RATE = 115200
-CAMERA_INDEX = int(os.environ.get("CAMERA_SOURCE", "0"))
+
+# Camera Source: Defaults to phone camera stream or local webcam
+CAMERA_ENV = os.environ.get("CAMERA_SOURCE", f"http://{AUTO_PHONE_IP}:8080/video").strip()
+if CAMERA_ENV.isdigit():
+    CAMERA_SOURCE = int(CAMERA_ENV)
+else:
+    CAMERA_SOURCE = CAMERA_ENV
+
 WAYPOINT_THRESHOLD_METERS = 2.5
 DESIRED_IMAGE_WIDTH = 640
 DESIRED_IMAGE_HEIGHT = 480
@@ -96,6 +125,10 @@ gps_app_connected = False
 latest_frame = None
 annotated_jpeg = None
 ser_conn: Optional[serial.Serial] = None
+bot_socket: Optional[socket.socket] = None
+ws_bot = None
+is_tcp_bot = False
+is_serial_bot = False
 ws_connected = False
 model = YOLO("yolov8n.pt")
 
@@ -113,80 +146,165 @@ def add_log(msg: str):
 
 
 # ============================================================
-# Hardware Serial Driver (Arduino Uno / COM7)
+# Universal Hardware Driver (Phone TCP/WS Relay & Direct USB Serial)
 # ============================================================
 def connect_hardware():
-    """Connect directly to Arduino on USB serial port."""
-    global ser_conn, ws_connected
-    try:
-        ser_conn = serial.Serial(BOT_WS_URL, BAUD_RATE, timeout=0.1)
-        ws_connected = True
-        add_log(f"Hardware linked on {BOT_WS_URL} @ {BAUD_RATE} baud")
-        threading.Thread(target=serial_listener_loop, daemon=True).start()
-    except Exception as e:
-        ws_connected = False
-        add_log(f"Hardware port {BOT_WS_URL} offline: {e}")
-    
-    # Auto-reconnect thread that automatically reconnects when plugged in
-    threading.Thread(target=hardware_auto_reconnect_loop, daemon=True).start()
+    """Connect to Arduino via Phone TCP Bridge, Phone WebSocket Relay, or Direct USB Serial."""
+    global ser_conn, bot_socket, ws_bot, ws_connected, is_tcp_bot, is_serial_bot, BOT_WS_URL
+    url = BOT_WS_URL.strip()
+
+    # 1. Phone TCP Bridge (e.g. tcp://10.236.135.235:8765)
+    if url.startswith("tcp://"):
+        try:
+            clean = url.replace("tcp://", "")
+            host, port_str = clean.split(":")
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2.0)
+            s.connect((host, int(port_str)))
+            bot_socket = s
+            is_tcp_bot = True
+            is_serial_bot = False
+            ws_connected = True
+            add_log(f"Linked to Arduino via Phone TCP Bridge ({url})")
+            threading.Thread(target=tcp_listener_loop, daemon=True).start()
+            return
+        except Exception as e:
+            ws_connected = False
+            bot_socket = None
+
+    # 2. Phone WebSocket Relay (e.g. ws://10.236.135.235:8765)
+    elif url.startswith("ws://") and WS_CLIENT_AVAILABLE:
+        try:
+            client = websocket.WebSocket()
+            client.settimeout(2.0)
+            client.connect(url)
+            ws_bot = client
+            is_tcp_bot = False
+            is_serial_bot = False
+            ws_connected = True
+            add_log(f"Linked to Arduino via Phone WebSocket Relay ({url})")
+            threading.Thread(target=ws_bot_listener_loop, daemon=True).start()
+            return
+        except Exception as e:
+            ws_connected = False
+            ws_bot = None
+
+    # 3. Direct USB Serial (Laptop plugged directly into Arduino)
+    elif url.upper().startswith("COM") or url.startswith("/dev/") or url.upper() in ["SERIAL", "AUTO"]:
+        try:
+            port_to_use = url
+            if url.upper() in ["SERIAL", "AUTO"]:
+                import serial.tools.list_ports
+                ports = [p.device for p in serial.tools.list_ports.comports() if "bluetooth" not in p.description.lower()]
+                port_to_use = ports[0] if ports else "COM7"
+
+            ser_conn = serial.Serial(port_to_use, BAUD_RATE, timeout=0.1)
+            is_serial_bot = True
+            is_tcp_bot = False
+            ws_connected = True
+            add_log(f"Linked to Arduino on Direct USB Serial ({port_to_use})")
+            threading.Thread(target=serial_listener_loop, daemon=True).start()
+            return
+        except Exception as e:
+            ws_connected = False
+            ser_conn = None
+
 
 def hardware_auto_reconnect_loop():
-    """Silently tries to reconnect whenever USB cable is plugged into the laptop."""
-    global ser_conn, ws_connected
+    """Background watcher that automatically connects/reconnects to phone or serial."""
+    global ws_connected
     while True:
-        if not ws_connected or ser_conn is None or not ser_conn.is_open:
-            try:
-                ser_conn = serial.Serial(BOT_WS_URL, BAUD_RATE, timeout=0.1)
-                ws_connected = True
-                add_log(f"Hardware reconnected on {BOT_WS_URL} @ {BAUD_RATE} baud")
-                threading.Thread(target=serial_listener_loop, daemon=True).start()
-            except Exception:
-                pass
-        time.sleep(2.0)
+        if not ws_connected:
+            connect_hardware()
+        time.sleep(2.5)
+
+
+def handle_incoming_telemetry_line(line: str):
+    """Parses ultrasonic, battery, and motor telemetry lines emitted by the Arduino."""
+    global current_distance_cm, dist_left_cm, dist_center_cm, dist_right_cm, battery_level, motor_current
+    line = line.strip()
+    if not line:
+        return
+    ts = datetime.now().strftime("%H:%M:%S")
+    esp_commands.append(f"[{ts}] RECV: {line}")
+    if len(esp_commands) > 30:
+        esp_commands.pop(0)
+
+    if line.startswith("US:"):
+        try:
+            dist = int(line.split(":")[1])
+            current_distance_cm = dist
+            dist_center_cm = dist
+        except ValueError:
+            pass
+    elif line.startswith("US_SWEEP:"):
+        try:
+            parts = line.split(":")
+            dist_left_cm = int(parts[1])
+            dist_center_cm = int(parts[2])
+            dist_right_cm = int(parts[3])
+            current_distance_cm = dist_center_cm
+        except (IndexError, ValueError):
+            pass
+    elif line.startswith("BAT:"):
+        try:
+            battery_level = int(line.split(":")[1])
+        except ValueError:
+            pass
+    elif line.startswith("AMP:"):
+        try:
+            motor_current = float(line.split(":")[1])
+        except ValueError:
+            pass
 
 
 def serial_listener_loop():
-    """Continuously read telemetry lines emitted by the Arduino."""
-    global ser_conn, ws_connected, current_distance_cm, dist_left_cm, dist_center_cm, dist_right_cm
-    global battery_level, motor_current
+    global ser_conn, ws_connected
     while ws_connected and ser_conn and ser_conn.is_open:
         try:
-            line = ser_conn.readline().decode("utf-8", errors="ignore").strip()
-            if not line:
-                continue
-            ts = datetime.now().strftime("%H:%M:%S")
-            esp_commands.append(f"[{ts}] RECV: {line}")
-            if len(esp_commands) > 30:
-                esp_commands.pop(0)
-
-            # Parse Ultrasonic: US:<dist> or US_SWEEP:<left>:<center>:<right>
-            if line.startswith("US:"):
-                dist = int(line.split(":")[1])
-                current_distance_cm = dist
-                dist_center_cm = dist
-            elif line.startswith("US_SWEEP:"):
-                parts = line.split(":")
-                dist_left_cm = int(parts[1])
-                dist_center_cm = int(parts[2])
-                dist_right_cm = int(parts[3])
-                current_distance_cm = dist_center_cm
-            elif line.startswith("BAT:"):
-                battery_level = int(line.split(":")[1])
-            elif line.startswith("AMP:"):
-                motor_current = float(line.split(":")[1])
+            line = ser_conn.readline().decode("utf-8", errors="ignore")
+            handle_incoming_telemetry_line(line)
         except Exception:
-            time.sleep(0.05)
+            break
+    ws_connected = False
+
+
+def tcp_listener_loop():
+    global bot_socket, ws_connected
+    buf = ""
+    while ws_connected and bot_socket:
+        try:
+            data = bot_socket.recv(1024).decode("utf-8", errors="ignore")
+            if not data:
+                break
+            buf += data
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                handle_incoming_telemetry_line(line)
+        except Exception:
+            break
+    ws_connected = False
+
+
+def ws_bot_listener_loop():
+    global ws_bot, ws_connected
+    while ws_connected and ws_bot:
+        try:
+            line = ws_bot.recv()
+            handle_incoming_telemetry_line(line)
+        except Exception:
+            break
+    ws_connected = False
 
 
 def send_hardware_cmd(cmd: str):
-    """Transmit motor or servo action to Arduino."""
-    global ser_conn, ws_connected, motor_current
+    """Transmit motor or servo action to Arduino via Phone or Serial."""
+    global ser_conn, bot_socket, ws_bot, ws_connected, motor_current
     ts = datetime.now().strftime("%H:%M:%S")
     esp_commands.append(f"[{ts}] SENT: {cmd}")
     if len(esp_commands) > 30:
         esp_commands.pop(0)
 
-    # Dynamic motor current simulation if sensor not wired
     if cmd in ["forward", "slow"]:
         motor_current = 1.2
     elif "steer" in cmd or "curve" in cmd:
@@ -194,25 +312,36 @@ def send_hardware_cmd(cmd: str):
     elif cmd in ["stop", "lock", "unlock"]:
         motor_current = 0.0
 
-    if ser_conn and ser_conn.is_open:
-        try:
-            ser_conn.write(f"{cmd}\n".encode("utf-8"))
-        except Exception as e:
-            add_log(f"Serial write error: {e}")
-            ws_connected = False
+    if not ws_connected:
+        return
+
+    try:
+        raw_cmd = (cmd + "\n").encode("utf-8")
+        if is_serial_bot and ser_conn and ser_conn.is_open:
+            ser_conn.write(raw_cmd)
+        elif is_tcp_bot and bot_socket:
+            bot_socket.sendall(raw_cmd)
+        elif ws_bot:
+            ws_bot.send(cmd)
+    except Exception as e:
+        ws_connected = False
+        add_log(f"Bot send error: {e}")
 
 
 # ============================================================
 # Vision Loop (YOLOv8 Obstacle Detection & Braking)
 # ============================================================
 def camera_worker():
-    """Captures frames from webcam index 0 (or creates a fallback canvas)."""
+    """Captures frames from phone camera stream or local webcam (with standby fallback)."""
     global latest_frame
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
-        add_log(f"Camera index {CAMERA_INDEX} not available. Using fallback canvas.")
+    cap = None
+    try:
+        cap = cv2.VideoCapture(CAMERA_SOURCE)
+    except Exception:
+        pass
+
     while True:
-        if cap.isOpened():
+        if cap and cap.isOpened():
             ret, frame = cap.read()
             if ret:
                 with frame_lock:
@@ -220,13 +349,20 @@ def camera_worker():
             else:
                 time.sleep(0.03)
         else:
-            # Standby blank frame so navigation does not stall
+            # Reconnect attempt or fallback
+            try:
+                cap = cv2.VideoCapture(CAMERA_SOURCE)
+                if not cap.isOpened() and isinstance(CAMERA_SOURCE, str):
+                    cap = cv2.VideoCapture(0)
+            except Exception:
+                pass
+
             canvas = np.zeros((DESIRED_IMAGE_HEIGHT, DESIRED_IMAGE_WIDTH, 3), dtype=np.uint8)
-            cv2.putText(canvas, "AUTODROP LIVE VISION STANDBY", (140, 240),
+            cv2.putText(canvas, "AUTODROP VISION STANDBY", (140, 240),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (6, 182, 212), 2)
             with frame_lock:
                 latest_frame = canvas
-            time.sleep(0.05)
+            time.sleep(0.5)
 
 
 def yolo_inference_loop():
@@ -258,7 +394,6 @@ def yolo_inference_loop():
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                 if cls_name in ["person", "car", "bicycle", "motorcycle", "dog", "chair", "box"]:
-                    # Is the object intersecting the driving corridor?
                     if not (x2 < corridor_x_min or x1 > corridor_x_max or y2 < corridor_y_min):
                         detected_obstacle = True
                         closest_name = cls_name
@@ -342,7 +477,6 @@ def run_autonomous_navigation(detected_obstacle: bool, obstacle_name: str):
     target_bearing = calculate_bearing(current_coord, target_coord)
     heading_error = (target_bearing - current_heading + 540) % 360 - 180
 
-    # Proportional Speed Control
     if dist_center_cm < 60:
         base_cmd = "slow"
     else:
@@ -369,7 +503,7 @@ def run_autonomous_navigation(detected_obstacle: bool, obstacle_name: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Starts background hardware connection, vision pipeline, and telemetry broadcasters."""
-    connect_hardware()
+    threading.Thread(target=hardware_auto_reconnect_loop, daemon=True).start()
     threading.Thread(target=camera_worker, daemon=True).start()
     threading.Thread(target=yolo_inference_loop, daemon=True).start()
     asyncio.create_task(periodic_broadcast_loop())
@@ -493,7 +627,7 @@ async def periodic_broadcast_loop():
 # ============================================================
 @app.get("/")
 def root():
-    return {"status": "running", "unit": "AutoDrop-01", "phase": active_phase}
+    return {"status": "running", "unit": "AutoDrop-01", "phase": active_phase, "bot_url": BOT_WS_URL}
 
 
 @app.get("/status")
@@ -700,7 +834,6 @@ async def complete_retrieval():
     add_log("Retrieval finished. Cargo secured. Initiating autonomous return to Base...")
     await broadcast_telemetry()
 
-    # Async return to base after brief safety pause
     async def rtb_task():
         await asyncio.sleep(3.0)
         await trigger_return_to_base()
@@ -782,7 +915,7 @@ if __name__ == "__main__":
     print("\n==========================================")
     print(" AutoDrop Fleet Gateway & Mission Control ")
     print("==========================================")
-    print(f"Hardware Port: {BOT_WS_URL} @ {BAUD_RATE}")
-    print(f"Camera Device: {CAMERA_INDEX}")
+    print(f"Target Bot URL: {BOT_WS_URL}")
+    print(f"Camera Device : {CAMERA_SOURCE}")
     print("==========================================\n")
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=False)
