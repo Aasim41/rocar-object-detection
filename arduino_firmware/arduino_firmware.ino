@@ -21,15 +21,15 @@
   // --- Arduino Uno / Nano (AVR) Pin Mapping ---
   #include <Servo.h>
 
-  // Left Motor Driver Logic Pins
+  // Left Motor Driver Logic Pins (D2, D3, D4)
   #define IN1 2
   #define IN2 4
 
-  // Right Motor Driver Logic Pins
+  // Right Motor Driver Logic Pins (D6, D11, D12)
   #define IN3 11
   #define IN4 12
 
-  // PWM Speed Pins
+  // PWM Speed Pins (D3 & D6 Hardware PWM)
   #define ENA 3
   #define ENB 6
 
@@ -39,6 +39,7 @@
   #define TRIG_PIN  A0
   #define ECHO_PIN  A1
 
+  // Alert Buzzer
   #define BUZZER_PIN A2
 #endif
 
