@@ -141,8 +141,8 @@ def main():
             pass
 
     if not target:
-        user_input = input("Enter COM Port (e.g. COM3) or IP (e.g. 10.194.42.199): ").strip()
-        target = user_input if user_input else "COM3"
+        user_input = input("Enter COM Port (e.g. COM3) or IP (press Enter for ESP32 AP 192.168.4.1): ").strip()
+        target = user_input if user_input else "192.168.4.1"
 
     # Connect via Serial or TCP
     if target.upper().startswith("COM") or target.startswith("/dev/"):
