@@ -23,7 +23,8 @@ except ImportError:
 
 BAUD_RATE = 115200
 WS_PORT = 8765
-SERIAL_PORT = None
+CONFIGURED_PORT = None  # None = dynamic auto-detect on every reconnect
+ACTIVE_PORT = None      # Currently connected serial port
 MOCK_MODE = False
 
 arduino_serial = None
@@ -75,7 +76,7 @@ def find_arduino_port():
 
 def try_open_serial():
     """Attempt to open the serial port; returns True on success, False otherwise."""
-    global arduino_serial, SERIAL_PORT
+    global arduino_serial, ACTIVE_PORT, CONFIGURED_PORT
 
     if MOCK_MODE:
         return True
@@ -84,10 +85,11 @@ def try_open_serial():
         print("[RELAY] ERROR: pyserial is not installed. Run: pip install pyserial")
         return False
 
-    if SERIAL_PORT is None or SERIAL_PORT == "auto":
+    # Always re-scan dynamically unless user explicitly passed a fixed port arg
+    if CONFIGURED_PORT is None or CONFIGURED_PORT == "auto":
         target = find_arduino_port()
     else:
-        target = SERIAL_PORT
+        target = CONFIGURED_PORT
 
     if not target:
         return False
@@ -96,8 +98,8 @@ def try_open_serial():
         ser = serial.Serial(port=target, baudrate=BAUD_RATE, timeout=0.05)
         time.sleep(1.5)  # Allow Arduino bootloader reset
         arduino_serial = ser
-        SERIAL_PORT = target
-        print(f"[RELAY] >>> Serial connected successfully: {SERIAL_PORT} @ {BAUD_RATE} <<<")
+        ACTIVE_PORT = target
+        print(f"[RELAY] >>> Serial connected successfully: {ACTIVE_PORT} @ {BAUD_RATE} <<<")
         return True
     except PermissionError:
         print(f"[RELAY] PERMISSION DENIED accessing {target}!")
@@ -110,7 +112,7 @@ def try_open_serial():
 
 async def handle_client(websocket, *args):
     """Handle incoming WebSocket connections from the laptop backend (api.py)."""
-    global connected_clients
+    global connected_clients, arduino_serial, ACTIVE_PORT
     client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
     print(f"[RELAY] [+] Client connected from: {client_ip}")
     connected_clients.add(websocket)
@@ -120,7 +122,7 @@ async def handle_client(websocket, *args):
         "type": "relay_status",
         "mock_mode": MOCK_MODE,
         "serial_connected": arduino_serial is not None and arduino_serial.is_open,
-        "port": SERIAL_PORT,
+        "port": ACTIVE_PORT,
     }
     await websocket.send(json.dumps(status_msg))
 
@@ -130,22 +132,36 @@ async def handle_client(websocket, *args):
             if not msg:
                 continue
 
+            # Support both plain-text ("forward") and JSON payload ({"action": "forward"})
+            clean_cmd = msg
+            if msg.startswith("{") and msg.endswith("}"):
+                try:
+                    payload = json.loads(msg)
+                    clean_cmd = str(payload.get("action") or payload.get("cmd") or payload.get("command") or msg).strip()
+                except Exception:
+                    clean_cmd = msg
+
             if MOCK_MODE:
-                print(f"[RELAY MOCK] -> Cmd: {msg}")
-                # Echo simulated ack for lock commands or sonar
-                if "LOCK" in msg:
-                    await websocket.send(f"ACK:{msg}")
+                print(f"[RELAY MOCK] -> Cmd: {clean_cmd}")
+                if "LOCK" in clean_cmd.upper():
+                    await websocket.send(f"ACK:{clean_cmd}")
                 continue
 
             if arduino_serial and arduino_serial.is_open:
                 try:
-                    arduino_serial.write((msg + "\n").encode("utf-8"))
+                    arduino_serial.write((clean_cmd + "\n").encode("utf-8"))
                     arduino_serial.flush()
                 except Exception as e:
-                    print(f"[RELAY] Serial write error: {e}")
+                    print(f"[RELAY] Serial write error: {e}. Resetting serial handle for reconnect...")
+                    try:
+                        arduino_serial.close()
+                    except Exception:
+                        pass
+                    arduino_serial = None
+                    ACTIVE_PORT = None
                     await websocket.send(json.dumps({"error": f"Serial write failed: {e}"}))
             else:
-                print(f"[RELAY WARNING] Dropped command '{msg}' (Arduino not connected yet)")
+                print(f"[RELAY WARNING] Dropped command '{clean_cmd}' (Arduino not connected yet)")
                 await websocket.send(json.dumps({"error": "Arduino not connected"}))
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -156,7 +172,7 @@ async def handle_client(websocket, *args):
 
 async def serial_reader_loop():
     """Continuously read telemetry/logs from Arduino and forward to WebSocket clients."""
-    global arduino_serial
+    global arduino_serial, ACTIVE_PORT
     while True:
         if arduino_serial and arduino_serial.is_open:
             try:
@@ -173,12 +189,13 @@ async def serial_reader_loop():
                                     disconnected.add(client)
                             connected_clients.difference_update(disconnected)
             except Exception as e:
-                print(f"[RELAY] Serial read error: {e}")
+                print(f"[RELAY] Serial read error: {e}. Closing port...")
                 try:
                     arduino_serial.close()
                 except Exception:
                     pass
                 arduino_serial = None
+                ACTIVE_PORT = None
         await asyncio.sleep(0.01)
 
 
@@ -194,22 +211,30 @@ async def background_reconnect_loop():
                     print("[RELAY] Scanning for USB OTG Arduino... (Ensure USB OTG is enabled in Android Settings)")
             else:
                 warn_counter = 0
-        await asyncio.sleep(3.0)
+        await asyncio.sleep(2.0)
 
 
 async def heartbeat_loop():
-    """Send periodic ping to keep serial link alive and active."""
+    """Send periodic ping (every 0.5s) so Arduino 1.5s hardware watchdog never triggers while connected."""
+    global arduino_serial, ACTIVE_PORT
     while True:
         if arduino_serial and arduino_serial.is_open:
             try:
                 arduino_serial.write(b"ping\n")
-            except Exception:
-                pass
-        await asyncio.sleep(5.0)
+                arduino_serial.flush()
+            except Exception as e:
+                print(f"[RELAY] Heartbeat ping write error: {e}")
+                try:
+                    arduino_serial.close()
+                except Exception:
+                    pass
+                arduino_serial = None
+                ACTIVE_PORT = None
+        await asyncio.sleep(0.5)
 
 
 async def main():
-    global SERIAL_PORT, MOCK_MODE
+    global CONFIGURED_PORT, MOCK_MODE
 
     if websockets is None:
         print("[RELAY] ERROR: websockets is not installed. Run: pip install websockets")
@@ -221,12 +246,12 @@ async def main():
             MOCK_MODE = True
             print("[RELAY] Running in MOCK (SIMULATED) MODE. No physical serial required.")
         elif not arg.startswith("-"):
-            SERIAL_PORT = arg
+            CONFIGURED_PORT = arg
 
     print("=" * 55)
-    print("  AutoDrop Phone Serial Relay Bridge")
+    print("  AutoDrop Phone Serial Relay Bridge v2.0")
     print(f"  WebSocket Port: {WS_PORT}")
-    print(f"  Target Serial : {SERIAL_PORT or 'Auto-detect'}")
+    print(f"  Target Serial : {CONFIGURED_PORT or 'Dynamic Auto-detect'}")
     print("=" * 55)
 
     # Initial connection attempt (will continue retrying in background if not ready)
