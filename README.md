@@ -1,12 +1,12 @@
-# Autonomous Delivery Cart (RoCAR)
+# Autonomous Delivery Cart (RoCAR) - ESP32 Edition
 
-Autonomous delivery bot system featuring YOLOv8-based obstacle detection, adaptive lane following, dual-engine GPS waypoint routing, and zero-latency smartphone OTG motor control.
+Autonomous indoor/campus delivery bot system featuring YOLOv8-based obstacle detection, adaptive lane following, dual-engine GPS waypoint routing, and untethered ESP32 wireless IoT telemetry.
 
 ---
 
 ## Architecture Overview
 
-```
+`
                       +-----------------------------+
                       |   Laptop (Brain / Server)   |
                       |   - FastAPI Backend         |
@@ -15,43 +15,36 @@ Autonomous delivery bot system featuring YOLOv8-based obstacle detection, adapti
                       |   - Dual Routing Engine     |
                       +--------------+--------------+
                                      |
-                         Local Wi-Fi / Hotspot
+                         Direct Wi-Fi / Hotspot
+                         (DeliveryBot-AP / Port 8765)
                                      |
                       +--------------v--------------+
-                      |   Smartphone (On-Bot Hub)   |
-                      |   - IP Webcam (Video Stream)|
-                      |   - Compass & GPS Telemetry |
-                      |   - Termux Serial Relay     |
-                      +--------------+--------------+
-                                     |
-                              USB-C / OTG Cable
-                                     |
-                      +--------------v--------------+
-                      |    Arduino Uno (Motor Hub)  |
-                      |   - L298N 4WD Motor Driver  |
+                      |   ESP32 Dual-Core Controller|
+                      |   - Dual L298N 4WD Drivers  |
                       |   - Scanning Ultrasonic     |
                       |   - Cargo Lock Servo        |
-                      |   - Watchdog & Reflex Safety|
+                      |   - Autonomous Brake Reflex |
+                      |   - Self-Hosted Web Remote  |
                       +-----------------------------+
-```
+`
 
 ---
 
 ## Directory Structure
 
-```
+`
 autonomous-cart-main/
 │
 ├── api.py                    # Core FastAPI backend & autonomous decision loop
 ├── dashboard.py              # Streamlit Mission Control telemetry dashboard
-├── serial_relay.py           # Termux WebSocket-to-USB Serial bridge script
+├── test_robot.py             # Interactive hardware test suite
 │
 ├── delivery_app.html         # Customer ordering & live tracking frontend
 ├── gps_app.html              # Mobile GPS telemetry streamer
 ├── manual_drive.html         # Ultra-low-latency manual drive pad
 │
-├── arduino_firmware/         # Microcontroller firmware
-│   └── arduino_firmware.ino  # Arduino Uno 4WD motor & sensor driver
+├── esp32_firmware/           # ESP32 Dual-Core Microcontroller Firmware
+│   └── esp32_firmware.ino    # FreeRTOS 4WD motor, sonar reflex, AP & TCP driver
 │
 ├── navigation/               # Autonomous navigation stack
 │   ├── pipeline.py           # Route coordinator & fallback manager
@@ -74,76 +67,73 @@ autonomous-cart-main/
 ├── requirements.txt          # Python dependencies
 ├── start.bat                 # 1-click startup launcher
 └── README.md                 # System documentation
-```
+`
 
 ---
 
-## Hardware Pinout (Arduino Uno)
+## Hardware Pinout (ESP32)
 
-| Component | Arduino Pin | Type | Notes |
+| Component | ESP32 Pin | Signal Type | Notes |
 | :--- | :--- | :--- | :--- |
-| **IN1** | **Pin 2** | Digital Output | Left motor direction |
-| **ENA** | **Pin 3** | PWM Output     | Left motor speed control |
-| **IN2** | **Pin 4** | Digital Output | Left motor direction |
-| **IN3** | **Pin 11** | Digital Output | Right motor direction |
-| **IN4** | **Pin 12** | Digital Output | Right motor direction |
-| **ENB** | **Pin 6** | PWM Output | Right motor speed control |
-| **Cargo Servo** | **Pin 10** | PWM Output | Delivery box lock (0°) / unlock (90°) |
-| **Scan Servo** | **Pin 9** | PWM Output | Ultrasonic sweep (45°, 90°, 135°) |
-| **HC-SR04 TRIG**| **Pin A0** | Digital Output | Distance trigger pulse |
-| **HC-SR04 ECHO**| **Pin A1** | Digital Input | Distance measurement pulse |
-| **Buzzer** | **Pin A2** | Digital Output | Proximity & obstacle warnings |
+| **Left Speed (ENA)** | **GPIO 25** | LEDC PWM (20kHz) | Left motors speed control (0-255) |
+| **Left Forward (IN1)** | **GPIO 27** | Digital Output | Left wheels forward |
+| **Left Reverse (IN2)** | **GPIO 14** | Digital Output | Left wheels reverse |
+| **Right Speed (ENB)** | **GPIO 26** | LEDC PWM (20kHz) | Right motors speed control (0-255) |
+| **Right Forward (IN3)** | **GPIO 16** | Digital Output | Right wheels forward |
+| **Right Reverse (IN4)** | **GPIO 17** | Digital Output | Right wheels reverse |
+| **Scan Turret Servo** | **GPIO 18** | 50Hz PWM | Ultrasonic sweep (45°, 90°, 135°) |
+| **Cargo Bay Latch** | **GPIO 19** | 50Hz PWM | Delivery box lock (0°) / unlock (90°) |
+| **HC-SR04 TRIG** | **GPIO 4** | Digital Output | Distance trigger pulse |
+| **HC-SR04 ECHO** | **GPIO 5** | Digital Input | Via 1kΩ / 2kΩ voltage divider (3.33V) |
+| **Buzzer** | **GPIO 23** | Digital Output | Proximity & obstacle warnings |
 
 ---
 
 ## Quick Start
 
-### 1. Laptop Setup
+### 1. ESP32 Firmware Upload
+1. Turn robot battery switch OFF.
+2. Open esp32_firmware/esp32_firmware.ino in Arduino IDE.
+3. Select board **ESP32 Dev Module** and the correct COM port.
+4. Install the ESP32Servo library via Library Manager.
+5. Click **Upload**.
+
+### 2. Laptop Setup
 Install Python dependencies:
-```bash
+`ash
 pip install -r requirements.txt
-```
+`
 
 Launch all services with one click:
-```cmd
+`cmd
 start.bat
-```
+`
 Or start manually:
-```bash
+`ash
 # Terminal 1: Backend
 uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 
 # Terminal 2: Dashboard
 streamlit run dashboard.py --server.port 8501
-```
+`
 
-### 2. Smartphone Setup
-1. Mount the phone facing forward on the cart.
-2. Install **IP Webcam** (Android) and start the video server.
-3. Install **Termux**, then run:
-   ```bash
-   pkg update && pkg install python
-   pip install websockets pyserial
-   python serial_relay.py
-   ```
-4. Plug the Arduino Uno into the phone using a USB OTG adapter.
-5. On the laptop, set the bot relay URL:
-   ```cmd
-   set BOT_WS_URL=ws://<PHONE_IP>:8765/
-   ```
+Connect laptop to the robot's Wi-Fi: **DeliveryBot-AP** (Password: 12345678).
+pi.py will auto-discover and connect to 	cp://192.168.4.1:8765!
 
 ---
 
 ## Interfaces
 
-- **Mission Control Dashboard**: `http://localhost:8501`
+- **ESP32 Onboard Web Joystick**: http://192.168.4.1
+  - Self-hosted mobile touch remote served directly from ESP32 flash (zero apps needed).
+- **Mission Control Dashboard**: http://localhost:8501
   - Real-time video feed with YOLO & road boundary overlays
   - Live battery, speed, temperature, and ultrasonic telemetry
   - Mode switcher (Autonomous vs Emergency Override)
   - Routing engine selector (Google Maps vs Campus Graph)
-- **Manual Drive Pad**: `http://localhost:8000/drive`
+- **Manual Drive Pad**: http://localhost:8000/drive
   - Zero-latency keyboard & touch controls
-- **Customer Delivery App**: `delivery_app.html`
+- **Customer Delivery App**: delivery_app.html
   - Order placement, live cart tracking, and OTP cargo unlock
-- **GPS Streamer**: `http://localhost:8000/gps`
+- **GPS Streamer**: http://localhost:8000/gps
   - Phone sensor telemetry streamer
