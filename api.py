@@ -436,37 +436,45 @@ def connect_esp32():
             is_serial_bot = False
             return
 
-    # --- TCP Socket Mode (TCPUART on Phone) ---
+    # --- TCP Socket Mode (ESP32 Direct AP or Network TCP) ---
     if url.startswith("tcp://"):
-        try:
-            if bot_socket:
-                try:
-                    bot_socket.close()
-                except Exception:
-                    pass
-                bot_socket = None
-            clean_url = url.replace("tcp://", "")
-            host, port_str = clean_url.split(":")
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2.5)
-            s.connect((host, int(port_str)))
-            bot_socket = s
-            is_tcp_bot = True
-            is_serial_bot = False
-            ws = None
-            ws_connected = True
-            add_log(f"✅ Connected to bot hardware via TCP at {url}")
-            print(f"✅ Connected to bot hardware via TCP at {url}")
-            return
-        except Exception as e:
-            ws_connected = False
-            if bot_socket:
-                try:
-                    bot_socket.close()
-                except Exception:
-                    pass
-                bot_socket = None
-            # Fallback: check if an Arduino USB serial port is plugged in!
+        clean_url = url.replace("tcp://", "")
+        # Probe candidates: configured/detected IP first, then ESP32 SoftAP default IP (192.168.4.1:8765)
+        candidates = [clean_url]
+        if "192.168.4.1:8765" not in candidates:
+            candidates.append("192.168.4.1:8765")
+
+        for cand in candidates:
+            try:
+                if bot_socket:
+                    try:
+                        bot_socket.close()
+                    except Exception:
+                        pass
+                    bot_socket = None
+                host, port_str = cand.split(":")
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.8)  # Fast probe
+                s.connect((host, int(port_str)))
+                s.settimeout(None)  # Connected - reset to non-timeout blocking
+                bot_socket = s
+                is_tcp_bot = True
+                is_serial_bot = False
+                ws = None
+                ws_connected = True
+                add_log(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
+                print(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
+                return
+            except Exception:
+                if bot_socket:
+                    try:
+                        bot_socket.close()
+                    except Exception:
+                        pass
+                    bot_socket = None
+                ws_connected = False
+
+        # Fallback: check if an ESP32 / Arduino USB serial port is plugged in!
             try:
                 import serial
                 import serial.tools.list_ports
@@ -564,7 +572,10 @@ def esp32_listener():
                     else:
                         time.sleep(0.01)
                 elif is_tcp_bot and bot_socket:
-                    chunk = bot_socket.recv(1024).decode("utf-8", errors="ignore")
+                    try:
+                        chunk = bot_socket.recv(1024).decode("utf-8", errors="ignore")
+                    except (socket.timeout, TimeoutError):
+                        continue
                     if not chunk:
                         print("⚠️ [TCP] Remote closed connection.")
                         ws_connected = False

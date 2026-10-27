@@ -1,22 +1,23 @@
 #if defined(ESP32)
   #include <ESP32Servo.h>
+  #include <esp_arduino_version.h>
 
-  // --- ESP32 Pin Mapping ---
-  #define IN1 23
-  #define IN2 22
-  #define IN3 21
-  #define IN4 19
+  // --- ESP32 Pin Mapping (Playbook Safe Pins) ---
+  #define IN1 27
+  #define IN2 14
+  #define IN3 16
+  #define IN4 17
 
   #define ENA 25
   #define ENB 26
 
-  #define CARGO_SERVO_PIN  18
-  #define SCAN_SERVO_PIN   13
+  #define CARGO_SERVO_PIN  19
+  #define SCAN_SERVO_PIN   18
 
-  #define TRIG_PIN  27
-  #define ECHO_PIN  14
+  #define TRIG_PIN  4
+  #define ECHO_PIN  5
 
-  #define BUZZER_PIN 12
+  #define BUZZER_PIN 23
 #else
   // --- Arduino Uno / Nano (AVR) Pin Mapping ---
   #include <Servo.h>
@@ -103,8 +104,18 @@ void beepWarning() {
 }
 
 void setMotorSpeed(int leftSpeed, int rightSpeed) {
+#if defined(ESP32)
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    ledcWrite(ENA, constrain(leftSpeed, 0, 255));
+    ledcWrite(ENB, constrain(rightSpeed, 0, 255));
+  #else
+    ledcWrite(0, constrain(leftSpeed, 0, 255));
+    ledcWrite(1, constrain(rightSpeed, 0, 255));
+  #endif
+#else
   analogWrite(ENA, constrain(leftSpeed, 0, 255));
   analogWrite(ENB, constrain(rightSpeed, 0, 255));
+#endif
 }
 
 void stopMotors() {
@@ -351,8 +362,20 @@ void setup() {
   pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
   
+#if defined(ESP32)
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    ledcAttach(ENA, 20000, 8);
+    ledcAttach(ENB, 20000, 8);
+  #else
+    ledcSetup(0, 20000, 8);
+    ledcAttachPin(ENA, 0);
+    ledcSetup(1, 20000, 8);
+    ledcAttachPin(ENB, 1);
+  #endif
+#else
   pinMode(ENA, OUTPUT);
   pinMode(ENB, OUTPUT);
+#endif
   
   stopMotors();
 
