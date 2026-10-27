@@ -24,15 +24,6 @@ pathlib.Path.exists = _safe_path_exists
 
 from ultralytics import YOLO
 
-# --- Try to import websocket for bot hardware connection ---
-try:
-    import websocket
-    WS_AVAILABLE = True
-except ImportError:
-    WS_AVAILABLE = False
-    print("⚠️  websocket-client not installed. Bot hardware connection disabled.")
-    print("   Install with: pip install websocket-client")
-
 from navigation.pipeline import fetch_routes
 from navigation.navigate import navigate, calculate_bearing
 from navigation.fnpp import to_tuple, calculate_distance
