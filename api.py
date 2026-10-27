@@ -13,6 +13,15 @@ import json
 import asyncio
 import traceback
 from datetime import datetime
+import pathlib
+_orig_path_exists = pathlib.Path.exists
+def _safe_path_exists(self):
+    try:
+        return _orig_path_exists(self)
+    except PermissionError:
+        return False
+pathlib.Path.exists = _safe_path_exists
+
 from ultralytics import YOLO
 
 # --- Try to import websocket for bot hardware connection ---
