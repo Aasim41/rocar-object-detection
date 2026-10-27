@@ -272,18 +272,17 @@ annotated_lock = threading.Lock()
 import queue
 
 # ============================================================
-# Bot Hardware Connection (ESP32 direct, USB Serial, TCP Bridge, or WebSocket Relay)
+# Bot Hardware Connection (ESP32 Direct Wi-Fi TCP or USB Serial)
 # ============================================================
 import socket
 
-ws = None
 bot_socket = None
 bot_serial = None
 is_tcp_bot = False
 is_serial_bot = False
 ws_connected = False
 esp32_cmd_queue = queue.Queue(maxsize=50)
-BOT_WS_URL = os.environ.get("BOT_WS_URL", f"tcp://{AUTO_PHONE_IP}:8765")
+BOT_WS_URL = os.environ.get("BOT_WS_URL", "tcp://192.168.4.1:8765")
 
 def process_bot_message(msg: str):
     """Process incoming telemetry line from Arduino/ESP32."""
@@ -357,8 +356,8 @@ def process_bot_message(msg: str):
             pass
 
 def esp32_sender_worker():
-    """Background thread that consumes the command queue and sends to bot."""
-    global ws, ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
+    """Background thread that consumes the command queue and sends to ESP32."""
+    global ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
     while True:
         cmd = esp32_cmd_queue.get()
         if cmd is None:
@@ -368,15 +367,12 @@ def esp32_sender_worker():
                 if is_serial_bot and bot_serial and bot_serial.is_open:
                     bot_serial.write((cmd + "\n").encode("utf-8"))
                     bot_serial.flush()
-                    print(f"🚀 [PC -> BOT SERIAL] {cmd.upper()}")
+                    print(f"🚀 [PC -> ESP32 SERIAL] {cmd.upper()}")
                 elif is_tcp_bot and bot_socket:
                     bot_socket.sendall((cmd + "\n").encode("utf-8"))
-                    print(f"🚀 [PC -> BOT TCP] {cmd.upper()}")
-                elif ws is not None:
-                    ws.send(cmd)
-                    print(f"🚀 [PC -> BOT WS] {cmd.upper()}")
+                    print(f"🚀 [PC -> ESP32 TCP] {cmd.upper()}")
             except Exception as e:
-                print(f"❌ [BOT SEND ERROR] {e}")
+                print(f"❌ [ESP32 SEND ERROR] {e}")
                 if ws_connected:
                     ws_connected = False
                     if bot_socket:
@@ -385,22 +381,21 @@ def esp32_sender_worker():
                         except Exception:
                             pass
                         bot_socket = None
-                    add_log(f"⚠️ Bot send failed: {e}. Reconnecting...")
+                    add_log(f"⚠️ ESP32 send failed: {e}. Reconnecting...")
         esp32_cmd_queue.task_done()
 
 def connect_esp32():
-    """Connect to Arduino via Direct USB Serial, Phone-Relay WebSocket, or raw TCP server."""
-    global ws, ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
+    """Connect to ESP32 via Direct Wi-Fi AP, Network TCP, or USB Serial."""
+    global ws_connected, bot_socket, is_tcp_bot, bot_serial, is_serial_bot
     if ws_connected:
         return
         
     url = os.environ.get("BOT_WS_URL")
     if not url:
-        current_ip = get_phone_hotspot_ip()
-        url = f"tcp://{current_ip}:8765"
+        url = "tcp://192.168.4.1:8765"
     url = url.strip()
 
-    # --- Direct USB Serial Mode (Laptop connected to Arduino via USB Cable) ---
+    # --- Direct USB Serial Mode (Laptop connected to ESP32 via USB Cable) ---
     if url.upper().startswith("COM") or url.startswith("/dev/") or url.upper() in ("AUTO", "AUTO_SERIAL", "SERIAL"):
         try:
             import serial
@@ -418,102 +413,82 @@ def connect_esp32():
                     return
 
             s = serial.Serial(port=port_to_use, baudrate=115200, timeout=0.08)
-            time.sleep(1.8)  # Wait for Arduino Uno AVR bootloader reset cycle to complete
+            time.sleep(0.4)
             s.reset_input_buffer()
             s.reset_output_buffer()
             
             bot_serial = s
             is_serial_bot = True
             is_tcp_bot = False
-            ws = None
             ws_connected = True
-            add_log(f"✅ Connected directly to Arduino on USB Serial {port_to_use} (115200 baud)")
-            print(f"✅ Connected directly to Arduino on USB Serial {port_to_use} (115200 baud)")
+            add_log(f"✅ Connected directly to ESP32 on USB Serial {port_to_use} (115200 baud)")
+            print(f"✅ Connected directly to ESP32 on USB Serial {port_to_use} (115200 baud)")
             return
-        except Exception as e:
+        except Exception:
             ws_connected = False
             bot_serial = None
             is_serial_bot = False
             return
 
-    # --- TCP Socket Mode (ESP32 Direct AP or Network TCP) ---
-    if url.startswith("tcp://"):
-        clean_url = url.replace("tcp://", "")
-        # Probe candidates: configured/detected IP first, then ESP32 SoftAP default IP (192.168.4.1:8765)
-        candidates = [clean_url]
-        if "192.168.4.1:8765" not in candidates:
-            candidates.append("192.168.4.1:8765")
+    # --- TCP Socket Mode (ESP32 Direct SoftAP or Network TCP) ---
+    clean_url = url.replace("tcp://", "")
+    candidates = [clean_url]
+    if "192.168.4.1:8765" not in candidates:
+        candidates.append("192.168.4.1:8765")
+    gateway_ip = get_phone_hotspot_ip()
+    if f"{gateway_ip}:8765" not in candidates:
+        candidates.append(f"{gateway_ip}:8765")
 
-        for cand in candidates:
-            try:
-                if bot_socket:
-                    try:
-                        bot_socket.close()
-                    except Exception:
-                        pass
-                    bot_socket = None
-                host, port_str = cand.split(":")
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.8)  # Fast probe
-                s.connect((host, int(port_str)))
-                s.settimeout(None)  # Connected - reset to non-timeout blocking
-                bot_socket = s
-                is_tcp_bot = True
-                is_serial_bot = False
-                ws = None
-                ws_connected = True
-                add_log(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
-                print(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
-                return
-            except Exception:
-                if bot_socket:
-                    try:
-                        bot_socket.close()
-                    except Exception:
-                        pass
-                    bot_socket = None
-                ws_connected = False
-
-        # Fallback: check if an ESP32 / Arduino USB serial port is plugged in!
-            try:
-                import serial
-                import serial.tools.list_ports
-                ports = list(serial.tools.list_ports.comports())
-                usb_ports = [p.device for p in ports if "bluetooth" not in p.description.lower()]
-                if usb_ports:
-                    port_to_use = usb_ports[0]
-                    s = serial.Serial(port=port_to_use, baudrate=115200, timeout=0.08)
-                    time.sleep(1.8)
-                    s.reset_input_buffer()
-                    s.reset_output_buffer()
-                    bot_serial = s
-                    is_serial_bot = True
-                    is_tcp_bot = False
-                    ws = None
-                    ws_connected = True
-                    add_log(f"✅ Auto-switched to USB Serial on {port_to_use}")
-                    print(f"✅ Auto-switched to USB Serial on {port_to_use}")
-                    return
-            except Exception:
-                pass
-    else:
-        # --- WebSocket Relay Mode ---
-        if not WS_AVAILABLE:
-            return
+    for cand in candidates:
         try:
-            ws_client = websocket.WebSocket()
-            ws_client.settimeout(2)
-            ws_client.connect(url)
-            ws = ws_client
-            is_tcp_bot = False
+            if bot_socket:
+                try:
+                    bot_socket.close()
+                except Exception:
+                    pass
+                bot_socket = None
+            host, port_str = cand.split(":")
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.7)  # Fast probe
+            s.connect((host, int(port_str)))
+            s.settimeout(None)  # Reset to standard non-timeout blocking
+            bot_socket = s
+            is_tcp_bot = True
             is_serial_bot = False
             ws_connected = True
-            add_log(f"✅ Connected to bot hardware at {url}")
-            print(f"✅ Connected to bot hardware at {url}")
+            add_log(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
+            print(f"✅ Connected to ESP32 bot hardware via TCP at tcp://{cand}")
             return
-        except Exception as e:
+        except Exception:
+            if bot_socket:
+                try:
+                    bot_socket.close()
+                except Exception:
+                    pass
+                bot_socket = None
             ws_connected = False
-            ws = None
+
+    # Fallback: check if ESP32 USB serial port is plugged into laptop!
+    try:
+        import serial
+        import serial.tools.list_ports
+        ports = list(serial.tools.list_ports.comports())
+        usb_ports = [p.device for p in ports if "bluetooth" not in p.description.lower()]
+        if usb_ports:
+            port_to_use = usb_ports[0]
+            s = serial.Serial(port=port_to_use, baudrate=115200, timeout=0.08)
+            time.sleep(0.4)
+            s.reset_input_buffer()
+            s.reset_output_buffer()
+            bot_serial = s
+            is_serial_bot = True
+            is_tcp_bot = False
+            ws_connected = True
+            add_log(f"✅ Auto-switched to ESP32 USB Serial on {port_to_use}")
+            print(f"✅ Auto-switched to ESP32 USB Serial on {port_to_use}")
+            return
+    except Exception:
+        pass
 
 def esp32_reconnect_worker():
     """Continuous background worker to ensure auto-reconnect to bot hardware."""
@@ -594,10 +569,6 @@ def esp32_listener():
                             if not line.startswith("DIST:"):
                                 print(f"📥 [BOT -> PC] {line}")
                             process_bot_message(line)
-                elif ws is not None:
-                    msg = ws.recv()
-                    if msg:
-                        process_bot_message(msg)
             except Exception:
                 time.sleep(0.05)
         else:
